@@ -290,7 +290,8 @@ class YouTubeVideoWatcher:
                 # Progress logging for live streams
                 if frame_count % 300 == 0:  # Every 10 seconds at 30fps
                     total_detections = sum(self.detector.detection_stats['vehicle_counts'].values())
-                    self.logger.info(f"Processed {frame_count} frames, "
+                    elapsed_formatted = self._format_time(elapsed_time)
+                    self.logger.info(f"Processed {frame_count} frames in {elapsed_formatted}, "
                                    f"FPS: {current_fps:.1f}, "
                                    f"Total vehicles: {total_detections}")
         
@@ -313,17 +314,22 @@ class YouTubeVideoWatcher:
             'video_info': video_info,
             'total_frames_processed': frame_count,
             'total_analysis_time': total_time,
+            'time_elapsed_formatted': self._format_time(total_time),
             'average_fps': avg_fps,
             'total_vehicle_detections': sum(self.detector.detection_stats['vehicle_counts'].values()),
             'vehicle_counts_by_type': self.detector.detection_stats['vehicle_counts'].copy(),
             'avg_detections_per_frame': (
                 sum(self.detector.detection_stats['vehicle_counts'].values()) / frame_count 
                 if frame_count > 0 else 0
-            )
+            ),
+            'analysis_start_time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time)),
+            'analysis_end_time': time.strftime('%Y-%m-%d %H:%M:%S'),
+            'processing_rate': frame_count / 60 if total_time > 60 else frame_count  # frames per minute or total frames
         }
         
         self.logger.info("Analysis completed:")
         self.logger.info(f"  Video: {safe_log_message(video_info.get('title', 'Unknown'))}")
+        self.logger.info(f"  Time elapsed: {stats['time_elapsed_formatted']}")
         self.logger.info(f"  Frames processed: {stats['total_frames_processed']}")
         self.logger.info(f"  Average FPS: {stats['average_fps']:.2f}")
         self.logger.info(f"  Total vehicles detected: {stats['total_vehicle_detections']}")
@@ -415,6 +421,28 @@ class YouTubeVideoWatcher:
         
         return frame
 
+    def _format_time(self, seconds: float) -> str:
+        """
+        Format time duration in human-readable format.
+        
+        Args:
+            seconds: Time duration in seconds
+            
+        Returns:
+            Formatted time string (e.g., "1h 23m 45s" or "2m 30s" or "45s")
+        """
+        total_seconds = int(seconds)
+        hours = total_seconds // 3600
+        minutes = (total_seconds % 3600) // 60
+        secs = total_seconds % 60
+        
+        if hours > 0:
+            return f"{hours}h {minutes}m {secs}s"
+        elif minutes > 0:
+            return f"{minutes}m {secs}s"
+        else:
+            return f"{secs}s"
+
 
 def main():
     """Main function for command-line usage."""
@@ -478,6 +506,9 @@ def main():
         
         print(f"\n✅ Analysis completed!")
         print(f"   Video: {stats['video_info'].get('title', 'Unknown')}")
+        print(f"   Time elapsed: {stats['time_elapsed_formatted']}")
+        print(f"   Frames processed: {stats['total_frames_processed']}")
+        print(f"   Average FPS: {stats['average_fps']:.2f}")
         print(f"   Total vehicles detected: {stats['total_vehicle_detections']}")
         print(f"   Vehicle breakdown: {stats['vehicle_counts_by_type']}")
         
