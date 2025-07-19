@@ -6,14 +6,11 @@ Watch and analyze YouTube videos/streams for vehicle detection from viewer persp
 
 import cv2
 import yt_dlp
-import threading
-import queue
 import time
 import logging
 import re
-from typing import Optional, Dict, List
-import subprocess
-from video_detector import VideoDetector
+from typing import Optional, Dict
+from .video_detector import VideoDetector
 
 def safe_log_message(message: str) -> str:
     """
