@@ -52,12 +52,15 @@ class VideoDetector:
         self.load_model()
     
     def setup_logging(self):
-        """Setup logging configuration."""
+        """Setup logging configuration with UTF-8 encoding for Unicode support."""
+        # Ensure logs directory exists
+        os.makedirs('logs', exist_ok=True)
+        
         logging.basicConfig(
             level=logging.INFO,
             format='%(asctime)s - %(levelname)s - %(message)s',
             handlers=[
-                logging.FileHandler('logs/video_detector.log'),
+                logging.FileHandler('logs/video_detector.log', encoding='utf-8'),
                 logging.StreamHandler()
             ]
         )

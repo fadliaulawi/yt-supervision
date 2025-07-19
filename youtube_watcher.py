@@ -15,6 +15,38 @@ from typing import Optional, Dict, List
 import subprocess
 from video_detector import VideoDetector
 
+def safe_log_message(message: str) -> str:
+    """
+    Safely encode a message for logging, removing or replacing problematic Unicode characters.
+    """
+    try:
+        # Try to encode to Windows-1252 (cp1252) to test compatibility
+        message.encode('cp1252')
+        return message
+    except UnicodeEncodeError:
+        # Replace problematic Unicode characters with safe alternatives
+        safe_replacements = {
+            '🔴': '[LIVE]',
+            '📺': '[VIDEO]',
+            '🎬': '[MOVIE]',
+            '🚗': '[CAR]',
+            '🏃': '[RUNNING]',
+            '📊': '[CHART]',
+            '💾': '[SAVE]',
+            '⚡': '[FAST]',
+            '🎯': '[TARGET]',
+            '🎨': '[ART]',
+        }
+        
+        safe_message = message
+        for unicode_char, replacement in safe_replacements.items():
+            safe_message = safe_message.replace(unicode_char, replacement)
+        
+        # Remove any remaining non-ASCII characters as fallback
+        safe_message = safe_message.encode('ascii', errors='ignore').decode('ascii')
+        
+        return safe_message
+
 class YouTubeVideoWatcher:
     """
     Watch and analyze YouTube videos/live streams for vehicle detection.
@@ -166,8 +198,12 @@ class YouTubeVideoWatcher:
         if not video_info:
             raise ValueError("Failed to extract video information")
         
-        self.logger.info(f"Title: {video_info.get('title', 'Unknown')}")
-        self.logger.info(f"Uploader: {video_info.get('uploader', 'Unknown')}")
+        # Use safe logging for Unicode-containing titles
+        title = video_info.get('title', 'Unknown')
+        uploader = video_info.get('uploader', 'Unknown')
+        
+        self.logger.info(f"Title: {safe_log_message(title)}")
+        self.logger.info(f"Uploader: {safe_log_message(uploader)}")
         self.logger.info(f"Live stream: {video_info.get('is_live', False)}")
         
         # Get stream URL
@@ -287,7 +323,7 @@ class YouTubeVideoWatcher:
         }
         
         self.logger.info("Analysis completed:")
-        self.logger.info(f"  Video: {video_info.get('title', 'Unknown')}")
+        self.logger.info(f"  Video: {safe_log_message(video_info.get('title', 'Unknown'))}")
         self.logger.info(f"  Frames processed: {stats['total_frames_processed']}")
         self.logger.info(f"  Average FPS: {stats['average_fps']:.2f}")
         self.logger.info(f"  Total vehicles detected: {stats['total_vehicle_detections']}")
@@ -402,10 +438,17 @@ def main():
     
     args = parser.parse_args()
     
-    # Setup logging
+    # Setup logging with UTF-8 encoding for Unicode support
+    import os
+    os.makedirs('logs', exist_ok=True)
+    
     logging.basicConfig(
         level=logging.INFO,
-        format='%(asctime)s - %(levelname)s - %(message)s'
+        format='%(asctime)s - %(levelname)s - %(message)s',
+        handlers=[
+            logging.FileHandler('logs/video_detector.log', encoding='utf-8'),
+            logging.StreamHandler()
+        ]
     )
     
     try:

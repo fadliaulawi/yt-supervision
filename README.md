@@ -452,6 +452,11 @@ The system automatically saves detection statistics in JSON format:
 - Try different YOLO model
 - Verify video quality and lighting
 
+**Unicode/Emoji errors in video titles:**
+- This is automatically handled by safe logging functions
+- Emoji characters are replaced with text equivalents (🔴 → [LIVE])
+- UTF-8 encoding is used for log files to support international characters
+
 **YouTube Error Recovery:**
 ```bash
 # Update yt-dlp to latest version
