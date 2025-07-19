@@ -374,17 +374,6 @@ class StreamlitDashboard:
     def initialize_video_source(self, config):
         """Initialize video source based on configuration."""
         try:
-            # Check if model file exists
-            model_path = Path(config['model_path'])
-            if not model_path.exists():
-                st.error(f"❌ Model file not found: {config['model_path']}")
-                st.info("Available models in models/ folder:")
-                models_dir = Path("models")
-                if models_dir.exists():
-                    for model_file in models_dir.glob("*.pt"):
-                        st.info(f"  - {model_file.name}")
-                return False
-            
             if config['mode'] == 'youtube':
                 st.info("🔄 Initializing YouTube stream...")
                 
@@ -732,28 +721,18 @@ class StreamlitDashboard:
                 elif config['mode'] == 'file' and not config.get('file'):
                     st.error("❌ Please upload a video file")
                 else:
-                    # Check if model file exists
-                    model_path = Path(config['model_path'])
-                    if not model_path.exists():
-                        st.error(f"❌ Model file not found: {config['model_path']}")
-                        st.info("Available models in models/ folder:")
-                        models_dir = Path("models")
-                        if models_dir.exists():
-                            for model_file in models_dir.glob("*.pt"):
-                                st.info(f"  - {model_file.name}")
-                    else:
-                        # Clear previous session results when starting new analysis
-                        st.session_state.current_session_results = None
-                        
-                        # Launch fire-and-forget analysis
-                        st.info("🚀 Starting independent analysis process...")
-                        st.info("💡 **Instructions:** OpenCV window will open shortly. Press 'Q' in the video window to stop.")
-                        
-                        if self.run_video_analysis_fire_and_forget(config):
-                            st.success("✅ Analysis process launched successfully!")
-                            st.info("🔄 Click 'Refresh Status' to check progress")
-                            time.sleep(2)
-                            st.rerun()
+                    # Clear previous session results when starting new analysis
+                    st.session_state.current_session_results = None
+                    
+                    # Launch fire-and-forget analysis
+                    st.info("🚀 Starting independent analysis process...")
+                    st.info("💡 **Instructions:** OpenCV window will open shortly. Press 'Q' in the video window to stop.")
+                    
+                    if self.run_video_analysis_fire_and_forget(config):
+                        st.success("✅ Analysis process launched successfully!")
+                        st.info("🔄 Click 'Refresh Status' to check progress")
+                        time.sleep(2)
+                        st.rerun()
         
         if stop_button:
             status = self.check_analysis_status()
