@@ -129,7 +129,7 @@ python youtube_watcher.py [URL] [OPTIONS]
 
 **YouTube-specific Options:**
 - `--confidence, -c`: Detection confidence threshold (0.0-1.0, default: 0.6)
-- `--model, -m`: YOLO model path (default: models/yolov8n.pt)
+- `--model, -m`: YOLO model path (default: models/yolov11n.pt)
 - `--quality, -q`: Video quality (480p, 720p, 1080p, best)
 - `--output, -o`: Save processed video to file
 - `--no-display`: Run without showing video (analysis only)
@@ -140,7 +140,7 @@ python youtube_watcher.py [URL] [OPTIONS]
 **High accuracy analysis:**
 ```bash
 python youtube_watcher.py "https://youtu.be/VIDEO_ID" \
-  --model models/yolov8l.pt \
+  --model models/yolo11l.pt \
   --confidence 0.4 \
   --quality 1080p
 ```
@@ -148,7 +148,7 @@ python youtube_watcher.py "https://youtu.be/VIDEO_ID" \
 **Fast analysis for live monitoring:**
 ```bash
 python youtube_watcher.py "https://youtube.com/live/LIVE_ID" \
-  --model models/yolov8n.pt \
+  --model models/yolo11n.pt \
   --confidence 0.7 \
   --quality 720p
 ```
@@ -205,13 +205,13 @@ Search YouTube for:
 
 **For Smooth Playback:**
 1. **Use 720p quality** for best balance
-2. **Choose models/yolov8n.pt model** for speed
+2. **Choose models/yolo11n.pt model** for speed
 3. **Increase confidence threshold** to 0.7+
 4. **Ensure stable internet connection**
 
 **For High Accuracy:**
 1. **Use 1080p quality** when possible
-2. **Choose models/yolov8l.pt model** for accuracy
+2. **Choose models/yolo11l.pt model** for accuracy
 3. **Lower confidence threshold** to 0.4-0.5
 4. **Use powerful hardware with GPU**
 
@@ -234,12 +234,18 @@ python demo.py --youtube-watch "https://youtu.be/INTERSECTION_CAM" --duration 30
 
 **Research and Analysis:**
 ```bash
-# Detailed analysis with high accuracy
+# Detailed analysis with YOLOv11 (latest)
 python youtube_watcher.py "RESEARCH_VIDEO_URL" \
-  --model models/yolov8l.pt \
+  --model models/yolo11l.pt \
   --quality 1080p \
   --output detailed_analysis.mp4 \
   --confidence 0.3
+
+# Try YOLOv10 (end-to-end detection)
+python youtube_watcher.py "RESEARCH_VIDEO_URL" \
+  --model models/yolov10m.pt \
+  --quality 1080p \
+  --confidence 0.4
 ```
 
 **Live Event Monitoring:**
@@ -261,7 +267,7 @@ python video_detector.py [OPTIONS]
 
 **Options:**
 - `--source, -s`: Video source (file path, webcam index, or stream URL)
-- `--model, -m`: YOLO model variant (models/yolov8n.pt, models/yolov8s.pt, models/yolov8m.pt, models/yolov8l.pt, models/yolov8x.pt)
+- `--model, -m`: YOLO model variant (models/yolo11n.pt, models/yolo11s.pt, models/yolo11m.pt, models/yolo11l.pt, models/yolo11x.pt)
 - `--confidence, -c`: Confidence threshold (0.0-1.0, default: 0.5)
 - `--output, -o`: Output video file path
 - `--no-display`: Disable real-time video display
@@ -277,7 +283,7 @@ python video_detector.py --source traffic.mp4 --confidence 0.7 --output detected
 
 **Use larger, more accurate model:**
 ```bash
-python video_detector.py --source 0 --model models/yolov8l.pt
+python video_detector.py --source 0 --model models/yolo11l.pt
 ```
 
 **Benchmark performance:**
@@ -285,15 +291,26 @@ python video_detector.py --source 0 --model models/yolov8l.pt
 python video_detector.py --source test_video.mp4 --benchmark --benchmark-frames 200
 ```
 
-## YOLO Model Variants
+## YOLO Model Variants (Updated to YOLOv11 - Latest!)
 
 | Model | Size | Speed | Accuracy | Use Case |
 |-------|------|-------|----------|----------|
-| models/yolov8n.pt | ~6MB | Fastest | Good | Real-time applications, limited hardware |
-| models/yolov8s.pt | ~22MB | Fast | Better | Balanced performance |
-| models/yolov8m.pt | ~52MB | Medium | High | High accuracy requirements |
-| models/yolov8l.pt | ~87MB | Slow | Higher | Maximum accuracy |
-| models/yolov8x.pt | ~136MB | Slowest | Highest | Research, offline processing |
+| models/yolo11n.pt | ~6MB | Fastest | Good | **Real-time applications, limited hardware** |
+| models/yolo11s.pt | ~22MB | Fast | Better | Balanced performance |
+| models/yolo11m.pt | ~52MB | Medium | High | High accuracy requirements |
+| models/yolo11l.pt | ~87MB | Slow | Higher | Maximum accuracy |
+| models/yolo11x.pt | ~136MB | Slowest | Highest | Research, offline processing |
+
+> **⚡ Now using YOLOv11 (2024) - Latest release!**  
+> - Improved efficiency over YOLOv8
+> - Better speed-accuracy trade-off
+> - Enhanced real-time performance
+> - Automatic model download on first use
+
+### Alternative Models Available:
+- **YOLOv10**: `yolov10n.pt`, `yolov10s.pt`, etc. (End-to-end detection, no NMS)
+- **YOLOv9**: `yolov9c.pt`, `yolov9e.pt` (Improved accuracy over YOLOv8)
+- **YOLOv8**: `yolov8n.pt`, `yolov8s.pt`, etc. (Previous stable version)
 
 ## API Usage
 
@@ -304,7 +321,7 @@ from video_detector import VideoDetector
 
 # Initialize detector
 detector = VideoDetector(
-    model_path="models/yolov8n.pt",
+    model_path="models/yolo11n.pt",
     confidence_threshold=0.7
 )
 
@@ -370,7 +387,7 @@ cv2.imwrite("detected_image.jpg", annotated_frame)
 🎬 Starting YouTube video analysis...
    URL: https://youtu.be/VIDEO_ID
    Quality: 720p
-   Model: yolov8n.pt
+   Model: yolo11n.pt
    Confidence: 0.6
 
 ✅ Analysis completed!
@@ -411,9 +428,9 @@ The system automatically saves detection statistics in JSON format:
 - **CPU Optimization**: Multi-threading for CPU-only systems
 
 ### Speed vs Accuracy Trade-offs
-1. **Maximum Speed**: Use `models/yolov8n.pt` with confidence 0.6+
-2. **Balanced**: Use `models/yolov8s.pt` with confidence 0.5
-3. **Maximum Accuracy**: Use `models/yolov8l.pt` or `models/yolov8x.pt` with confidence 0.3-0.4
+1. **Maximum Speed**: Use `models/yolo11n.pt` with confidence 0.6+
+2. **Balanced**: Use `models/yolo11s.pt` with confidence 0.5
+3. **Maximum Accuracy**: Use `models/yolo11l.pt` or `models/yolo11x.pt` with confidence 0.3-0.4
 
 ### Tips for Better Performance
 - Lower input resolution for faster processing
@@ -442,7 +459,7 @@ The system automatically saves detection statistics in JSON format:
 
 **Low FPS or choppy YouTube playback:**
 - Use lower quality (720p → 480p)
-- Use faster model (models/yolov8l.pt → models/yolov8n.pt)
+- Use faster model (models/yolo11l.pt → models/yolo11n.pt)
 - Increase confidence threshold
 - Check internet speed
 
@@ -474,16 +491,16 @@ python -c "import yt_dlp; ydl = yt_dlp.YoutubeDL(); print(ydl.extract_info('YOUR
 **Model Download Failed:**
 ```bash
 # Manually download model to models/ directory
-wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt -P models/
+wget https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt -P models/
 ```
 
 **CUDA Out of Memory:**
-- Use smaller model variant (models/yolov8n.pt)
+- Use smaller model variant (models/yolo11n.pt)
 - Reduce input resolution
 - Lower batch size
 
 **Low FPS:**
-- Use faster model (models/yolov8n.pt)
+- Use faster model (models/yolo11n.pt)
 - Increase confidence threshold
 - Enable GPU acceleration
 

@@ -8,6 +8,9 @@ from pathlib import Path
 import logging
 from typing import Optional, List, Dict, Tuple
 import json
+import requests
+import urllib.request
+from urllib.error import URLError
 
 class VideoDetector:
     """
@@ -15,7 +18,7 @@ class VideoDetector:
     Supports real-time detection, video file processing, and webcam input.
     """
     
-    def __init__(self, model_path: str = "models/yolov8n.pt", confidence_threshold: float = 0.7):
+    def __init__(self, model_path: str = "models/yolo11n.pt", confidence_threshold: float = 0.7):
         """
         Initialize the VideoDetector.
         
@@ -49,7 +52,103 @@ class VideoDetector:
         }
         
         self.setup_logging()
+        self.ensure_model_available()
         self.load_model()
+
+    def ensure_model_available(self):
+        """
+        Check if the model exists, and download it if not.
+        Falls back to YOLOv8 if YOLOv11 is not available.
+        """
+        model_file = Path(self.model_path)
+        
+        # Create models directory if it doesn't exist
+        model_file.parent.mkdir(parents=True, exist_ok=True)
+        
+        if model_file.exists():
+            self.logger.info(f"Model found: {self.model_path}")
+            return
+        
+        self.logger.info(f"Model not found: {self.model_path}")
+        
+        # Try to download the model
+        if self.download_model(self.model_path):
+            self.logger.info(f"Successfully downloaded: {self.model_path}")
+            return
+        
+        # If download fails, fall back to YOLOv8
+        fallback_model = self.model_path.replace("yolo11", "yolov8")
+        fallback_path = Path(fallback_model)
+        
+        if fallback_path.exists():
+            self.logger.warning(f"Using fallback model: {fallback_model}")
+            self.model_path = fallback_model
+            return
+        
+        # Try to download YOLOv8 fallback
+        if self.download_model(fallback_model):
+            self.logger.info(f"Successfully downloaded fallback model: {fallback_model}")
+            self.model_path = fallback_model
+            return
+        
+        # Final fallback - let YOLO handle auto-download
+        self.logger.warning("Will rely on YOLO auto-download functionality")
+
+    def download_model(self, model_path: str) -> bool:
+        """
+        Download a YOLO model from the official repository.
+        
+        Args:
+            model_path: Path where to save the model
+            
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            model_name = Path(model_path).name
+            
+            # Determine download URL based on model name
+            if "yolo11" in model_name:
+                # YOLOv11 models (latest)
+                base_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0"
+            elif "yolov10" in model_name:
+                # YOLOv10 models
+                base_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0"
+            elif "yolov9" in model_name:
+                # YOLOv9 models
+                base_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0"
+            else:
+                # YOLOv8 models (fallback)
+                base_url = "https://github.com/ultralytics/assets/releases/download/v8.3.0"
+            
+            download_url = f"{base_url}/{model_name}"
+            
+            self.logger.info(f"Downloading {model_name} from {download_url}")
+            
+            # Download with progress indication
+            def show_progress(block_num, block_size, total_size):
+                if total_size > 0:
+                    percent = min(100, (block_num * block_size / total_size) * 100)
+                    if block_num % 50 == 0:  # Update every 50 blocks
+                        print(f"\rDownloading {model_name}: {percent:.1f}%", end='', flush=True)
+            
+            urllib.request.urlretrieve(download_url, model_path, reporthook=show_progress)
+            print(f"\n✅ Successfully downloaded {model_name}")
+            
+            # Verify the downloaded file
+            if Path(model_path).stat().st_size > 1000000:  # At least 1MB
+                return True
+            else:
+                self.logger.error(f"Downloaded file seems too small: {model_path}")
+                Path(model_path).unlink(missing_ok=True)  # Remove incomplete file
+                return False
+                
+        except URLError as e:
+            self.logger.error(f"Network error downloading {model_name}: {e}")
+            return False
+        except Exception as e:
+            self.logger.error(f"Failed to download {model_name}: {e}")
+            return False
     
     def setup_logging(self):
         """Setup logging configuration with UTF-8 encoding for Unicode support."""
@@ -407,8 +506,8 @@ def main():
     parser = argparse.ArgumentParser(description="Vehicle Detection in Videos using YOLO")
     parser.add_argument('--source', '-s', type=str, default='0', 
                        help='Video source (file path, webcam index, or stream URL)')
-    parser.add_argument('--model', '-m', type=str, default='models/yolov8n.pt',
-                       help='YOLO model path (models/yolov8n.pt, models/yolov8s.pt, models/yolov8m.pt, models/yolov8l.pt, models/yolov8x.pt)')
+    parser.add_argument('--model', '-m', type=str, default='models/yolo11n.pt',
+                       help='YOLO model path (models/yolo11n.pt, models/yolo11s.pt, models/yolo11m.pt, models/yolo11l.pt, models/yolo11x.pt)')
     parser.add_argument('--confidence', '-c', type=float, default=0.5,
                        help='Confidence threshold for detections')
     parser.add_argument('--output', '-o', type=str, default=None,

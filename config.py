@@ -4,7 +4,7 @@ Modify these settings to customize detection behavior.
 """
 
 # Model Configuration
-DEFAULT_MODEL = "models/yolov8n.pt"  # Options: models/yolov8n.pt, models/yolov8s.pt, models/yolov8m.pt, models/yolov8l.pt, models/yolov8x.pt
+DEFAULT_MODEL = "models/yolo11n.pt"  # Primary: models/yolo11n.pt, Fallback: models/yolov8n.pt
 CONFIDENCE_THRESHOLD = 0.7    # Minimum confidence for detections (0.0 - 1.0)
 
 # Vehicle Classes (COCO dataset class IDs)

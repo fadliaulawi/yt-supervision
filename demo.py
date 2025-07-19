@@ -47,14 +47,14 @@ def demo_youtube_watch(youtube_url: str, quality: str = "720p", max_duration: in
     try:
         watcher = YouTubeVideoWatcher(
             confidence_threshold=0.7,
-            model_path="models/yolov8n.pt",
+            model_path="models/yolo11n.pt",
             quality=quality
         )
         
         print(f"📺 Analyzing YouTube video/stream...")
         print(f"   URL: {youtube_url}")
         print(f"   Quality: {quality}")
-        print(f"   Model: YOLOv8n (fast)")
+        print(f"   Model: YOLOv11n (latest, fastest)")
         if max_duration:
             print(f"   Max duration: {max_duration} seconds")
         

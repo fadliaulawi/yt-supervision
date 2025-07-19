@@ -4,32 +4,51 @@ This directory contains the YOLO model files used for vehicle detection.
 
 ## Available Models
 
-The following YOLO v8 models will be automatically downloaded when first used:
+The following YOLO v11 models will be automatically downloaded when first used:
 
 | Model File | Size | Speed | Accuracy | Description |
 |------------|------|-------|----------|-------------|
-| `yolov8n.pt` | ~6MB | Fastest | Good | Nano model - best for real-time applications |
-| `yolov8s.pt` | ~22MB | Fast | Better | Small model - good balance of speed/accuracy |
-| `yolov8m.pt` | ~52MB | Medium | High | Medium model - higher accuracy |
-| `yolov8l.pt` | ~87MB | Slow | Higher | Large model - best for accuracy |
-| `yolov8x.pt` | ~136MB | Slowest | Highest | Extra large model - research/offline use |
+| `yolo11n.pt` | ~6MB | Fastest | Good | Nano model - best for real-time applications |
+| `yolo11s.pt` | ~22MB | Fast | Better | Small model - good balance of speed/accuracy |
+| `yolo11m.pt` | ~52MB | Medium | High | Medium model - higher accuracy |
+| `yolo11l.pt` | ~87MB | Slow | Higher | Large model - best for accuracy |
+| `yolo11x.pt` | ~136MB | Slowest | Highest | Extra large model - research/offline use |
+
+## Alternative YOLO Versions
+
+While YOLOv11 is the recommended default (latest 2024 release), other versions are also supported:
+
+### YOLOv10 (End-to-End Detection)
+- `yolov10n.pt`, `yolov10s.pt`, `yolov10m.pt`, `yolov10l.pt`, `yolov10x.pt`
+- No NMS (Non-Maximum Suppression) required
+- Faster inference for some use cases
+
+### YOLOv9 (Improved Accuracy)
+- `yolov9c.pt`, `yolov9e.pt`
+- Better accuracy than YOLOv8 
+- Good for research applications
+
+### YOLOv8 (Previous Stable)
+- `yolov8n.pt`, `yolov8s.pt`, `yolov8m.pt`, `yolov8l.pt`, `yolov8x.pt`
+- Well-tested and stable
+- Broad compatibility
 
 ## Model Selection Guide
 
 ### For Real-Time Applications
-- **Webcam detection**: Use `yolov8n.pt`
-- **Live stream analysis**: Use `yolov8n.pt` or `yolov8s.pt`
-- **Mobile/embedded**: Use `yolov8n.pt`
+- **Webcam detection**: Use `yolo11n.pt`
+- **Live stream analysis**: Use `yolo11n.pt` or `yolo11s.pt`
+- **Mobile/embedded**: Use `yolo11n.pt`
 
 ### For High Accuracy
-- **Research analysis**: Use `yolov8l.pt` or `yolov8x.pt`
-- **Offline processing**: Use `yolov8l.pt` or `yolov8x.pt`
-- **Professional analysis**: Use `yolov8m.pt` or `yolov8l.pt`
+- **Research analysis**: Use `yolo11l.pt` or `yolo11x.pt`
+- **Offline processing**: Use `yolo11l.pt` or `yolo11x.pt`
+- **Professional analysis**: Use `yolo11m.pt` or `yolo11l.pt`
 
 ### For Balanced Performance
-- **General purpose**: Use `yolov8s.pt`
-- **YouTube video analysis**: Use `yolov8s.pt` or `yolov8m.pt`
-- **Mixed workloads**: Use `yolov8s.pt`
+- **General purpose**: Use `yolo11s.pt`
+- **YouTube video analysis**: Use `yolo11s.pt` or `yolo11m.pt`
+- **Mixed workloads**: Use `yolo11s.pt`
 
 ## Automatic Download
 
@@ -45,13 +64,13 @@ To manually download models:
 
 ```bash
 # Download nano model (fastest)
-wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8n.pt -P models/
+wget https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11n.pt -P models/
 
 # Download small model (balanced)
-wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8s.pt -P models/
+wget https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11s.pt -P models/
 
 # Download large model (most accurate)
-wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8l.pt -P models/
+wget https://github.com/ultralytics/assets/releases/download/v8.3.0/yolo11l.pt -P models/
 ```
 
 ## Model Performance
@@ -59,16 +78,16 @@ wget https://github.com/ultralytics/assets/releases/download/v0.0.0/yolov8l.pt -
 Performance varies based on hardware:
 
 ### CPU Performance (Intel i7)
-- `yolov8n.pt`: ~50-80 FPS
-- `yolov8s.pt`: ~30-50 FPS  
-- `yolov8m.pt`: ~15-25 FPS
-- `yolov8l.pt`: ~8-15 FPS
+- `yolo11n.pt`: ~50-80 FPS
+- `yolo11s.pt`: ~30-50 FPS  
+- `yolo11m.pt`: ~15-25 FPS
+- `yolo11l.pt`: ~8-15 FPS
 
 ### GPU Performance (RTX 3070)
-- `yolov8n.pt`: ~200-300 FPS
-- `yolov8s.pt`: ~150-200 FPS
-- `yolov8m.pt`: ~80-120 FPS  
-- `yolov8l.pt`: ~50-80 FPS
+- `yolo11n.pt`: ~200-300 FPS
+- `yolo11s.pt`: ~150-200 FPS
+- `yolo11m.pt`: ~80-120 FPS  
+- `yolo11l.pt`: ~50-80 FPS
 
 ## Vehicle Detection Classes
 
@@ -95,11 +114,11 @@ Models are periodically updated by Ultralytics. To get the latest version:
 - Try manual download with wget/curl
 
 **Out of memory errors:**
-- Use smaller model (yolov8l.pt → yolov8n.pt)
+- Use smaller model (yolo11l.pt → yolo11n.pt)
 - Reduce input resolution
 - Lower batch size
 
 **Poor detection accuracy:**
-- Use larger model (yolov8n.pt → yolov8l.pt)
+- Use larger model (yolo11n.pt → yolo11l.pt)
 - Lower confidence threshold
 - Ensure good video quality and lighting

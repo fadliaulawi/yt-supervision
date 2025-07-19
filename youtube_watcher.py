@@ -54,7 +54,7 @@ class YouTubeVideoWatcher:
     
     def __init__(self, 
                  confidence_threshold: float = 0.7,
-                 model_path: str = "models/yolov8n.pt",
+                 model_path: str = "models/yolo11n.pt",
                  quality: str = "720p"):
         """
         Initialize YouTube video watcher.
@@ -424,7 +424,7 @@ def main():
     parser.add_argument('url', type=str, help='YouTube video/stream URL')
     parser.add_argument('--confidence', '-c', type=float, default=0.6,
                        help='Detection confidence threshold')
-    parser.add_argument('--model', '-m', type=str, default='models/yolov8n.pt',
+    parser.add_argument('--model', '-m', type=str, default='models/yolo11n.pt',
                        help='YOLO model path')
     parser.add_argument('--quality', '-q', type=str, default='720p',
                        choices=['480p', '720p', '1080p', 'best'],

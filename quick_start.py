@@ -56,7 +56,7 @@ def show_usage_examples():
     print("   python demo.py --video input.mp4 --output detected_output.mp4")
     
     print("\n⚙️  ADVANCED OPTIONS:")
-    print("   python video_detector.py --source video.mp4 --confidence 0.7 --model yolov8l.pt")
+    print("   python video_detector.py --source video.mp4 --confidence 0.7 --model yolov11l.pt")
     
     print("\n📊 BENCHMARK PERFORMANCE:")
     print("   python video_detector.py --source test_video.mp4 --benchmark")
@@ -69,7 +69,7 @@ def show_usage_examples():
     print("="*60)
     print("• Press 'q' to quit during video playback")
     print("• Press 's' to save a screenshot")
-    print("• Use yolov8n.pt for speed, yolov8l.pt for accuracy")
+    print("• Use yolov11n.pt for speed, yolov11l.pt for accuracy")
     print("• Adjust confidence threshold based on your needs")
     print("• Check logs/video_detector.log for detailed logs")
 
