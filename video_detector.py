@@ -11,6 +11,8 @@ import json
 import requests
 import urllib.request
 from urllib.error import URLError
+import torch
+from config import USE_GPU
 
 class VideoDetector:
     """
@@ -18,7 +20,7 @@ class VideoDetector:
     Supports real-time detection, video file processing, and webcam input.
     """
     
-    def __init__(self, model_path: str = "models/yolo11n.pt", confidence_threshold: float = 0.7):
+    def __init__(self, model_path: str = "models/yolo11l.pt", confidence_threshold: float = 0.7):
         """
         Initialize the VideoDetector.
         
@@ -29,6 +31,10 @@ class VideoDetector:
         self.model_path = model_path
         self.confidence_threshold = confidence_threshold
         self.model = None
+        
+        # Device configuration
+        self.setup_device()
+        
         self.vehicle_classes = [2, 3, 5, 7]  # car, motorcycle, bus, truck in COCO dataset
         self.class_names = {
             2: 'car',
@@ -54,6 +60,21 @@ class VideoDetector:
         self.setup_logging()
         self.ensure_model_available()
         self.load_model()
+
+    def setup_device(self):
+        """Setup device configuration (GPU/CPU) for YOLO model."""
+        if USE_GPU and torch.cuda.is_available():
+            self.device = 'cuda'
+            gpu_name = torch.cuda.get_device_name(0)
+            gpu_memory = torch.cuda.get_device_properties(0).total_memory / 1024**3
+            print(f"🚀 GPU acceleration enabled: {gpu_name} ({gpu_memory:.1f} GB)")
+        else:
+            self.device = 'cpu'
+            if USE_GPU:
+                print("⚠️ GPU requested but not available - falling back to CPU")
+                print("💡 Install CUDA-enabled PyTorch: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121")
+            else:
+                print("🖥️ Using CPU for inference")
 
     def ensure_model_available(self):
         """
@@ -166,11 +187,18 @@ class VideoDetector:
         self.logger = logging.getLogger(__name__)
     
     def load_model(self):
-        """Load the YOLO model."""
+        """Load the YOLO model and configure device."""
         try:
             self.logger.info(f"Loading YOLO model: {self.model_path}")
             self.model = YOLO(self.model_path)
-            self.logger.info("Model loaded successfully")
+            
+            # Move model to configured device
+            if hasattr(self, 'device'):
+                self.model.to(self.device)
+                self.logger.info(f"Model loaded successfully on device: {self.device}")
+            else:
+                self.logger.info("Model loaded successfully")
+                
         except Exception as e:
             self.logger.error(f"Failed to load model: {e}")
             raise

@@ -47,7 +47,7 @@ def demo_youtube_watch(youtube_url: str, quality: str = "720p", max_duration: in
     try:
         watcher = YouTubeVideoWatcher(
             confidence_threshold=0.7,
-            model_path="models/yolo11n.pt",
+            model_path="models/yolo11l.pt",
             quality=quality
         )
         
