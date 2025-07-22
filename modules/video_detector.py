@@ -12,7 +12,7 @@ import os
 import time
 import urllib.request
 from pathlib import Path
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Tuple
 from urllib.error import URLError
 
 import cv2
@@ -21,6 +21,300 @@ import torch
 from ultralytics import YOLO
 
 from .config import Config
+
+
+class KalmanBoxTracker:
+    """
+    Kalman filter-based tracker for bounding box tracking.
+    Represents the internal state of individual tracked objects observed as bbox.
+    """
+    count = 0
+
+    def __init__(self, bbox):
+        """
+        Initialize a tracker using initial bounding box.
+        """
+        # Define constant velocity model
+        try:
+            from filterpy.kalman import KalmanFilter
+        except ImportError:
+            # Fallback implementation without filterpy
+            self.use_simple_tracker = True
+            self.bbox = bbox
+            self.time_since_update = 0
+            self.id = KalmanBoxTracker.count
+            KalmanBoxTracker.count += 1
+            self.history = []
+            self.hits = 1
+            self.hit_streak = 1
+            self.age = 1
+            return
+
+        self.use_simple_tracker = False
+        self.kf = KalmanFilter(dim_x=7, dim_z=4)
+        self.kf.F = np.array([[1,0,0,0,1,0,0],
+                              [0,1,0,0,0,1,0],
+                              [0,0,1,0,0,0,1],
+                              [0,0,0,1,0,0,0],
+                              [0,0,0,0,1,0,0],
+                              [0,0,0,0,0,1,0],
+                              [0,0,0,0,0,0,1]])
+        
+        self.kf.H = np.array([[1,0,0,0,0,0,0],
+                              [0,1,0,0,0,0,0],
+                              [0,0,1,0,0,0,0],
+                              [0,0,0,1,0,0,0]])
+
+        self.kf.R[2:,2:] *= 10.
+        self.kf.P[4:,4:] *= 1000.
+        self.kf.P *= 10.
+        self.kf.Q[-1,-1] *= 0.01
+        self.kf.Q[4:,4:] *= 0.01
+
+        self.kf.x[:4] = self._convert_bbox_to_z(bbox)
+        self.time_since_update = 0
+        self.id = KalmanBoxTracker.count
+        KalmanBoxTracker.count += 1
+        self.history = []
+        self.hits = 1
+        self.hit_streak = 1
+        self.age = 1
+
+    def update(self, bbox):
+        """
+        Updates the state vector with observed bbox.
+        """
+        self.time_since_update = 0
+        self.history = []
+        self.hits += 1
+        self.hit_streak += 1
+        
+        if self.use_simple_tracker:
+            self.bbox = bbox
+        else:
+            self.kf.update(self._convert_bbox_to_z(bbox))
+
+    def predict(self):
+        """
+        Advances the state vector and returns the predicted bounding box estimate.
+        """
+        if self.use_simple_tracker:
+            self.age += 1
+            if self.time_since_update > 0:
+                self.hit_streak = 0
+            self.time_since_update += 1
+            self.history.append(self._convert_x_to_bbox(self.bbox))
+            return self.history[-1]
+        
+        if (self.kf.x[6] + self.kf.x[2]) <= 0:
+            self.kf.x[6] *= 0.0
+        
+        self.kf.predict()
+        self.age += 1
+        if self.time_since_update > 0:
+            self.hit_streak = 0
+        self.time_since_update += 1
+        self.history.append(self._convert_x_to_bbox(self.kf.x))
+        return self.history[-1]
+
+    def get_state(self):
+        """
+        Returns the current bounding box estimate.
+        """
+        if self.use_simple_tracker:
+            return self._convert_x_to_bbox(self.bbox)
+        return self._convert_x_to_bbox(self.kf.x)
+
+    def _convert_bbox_to_z(self, bbox):
+        """
+        Takes a bounding box in the form [x1,y1,x2,y2] and returns z in the form
+        [x,y,s,r] where x,y is the centre of the box and s is the scale/area and r is
+        the aspect ratio
+        """
+        w = bbox[2] - bbox[0]
+        h = bbox[3] - bbox[1]
+        x = bbox[0] + w/2.
+        y = bbox[1] + h/2.
+        s = w * h
+        r = w / float(h)
+        return np.array([x, y, s, r]).reshape((4, 1))
+
+    def _convert_x_to_bbox(self, x, score=None):
+        """
+        Takes a bounding box in the centre form [x,y,s,r] and returns it in the form
+        [x1,y1,x2,y2] where x1,y1 is the top left and x2,y2 is the bottom right
+        """
+        if isinstance(x, list):
+            # Simple tracker case
+            return x
+        
+        if len(x.shape) == 1:
+            x = x.reshape(-1, 1)
+        
+        w = np.sqrt(x[2] * x[3])
+        h = x[2] / w
+        if score is None:
+            return np.array([x[0]-w/2., x[1]-h/2., x[0]+w/2., x[1]+h/2.]).reshape((1, 4))
+        else:
+            return np.array([x[0]-w/2., x[1]-h/2., x[0]+w/2., x[1]+h/2., score]).reshape((1, 5))
+
+
+def linear_assignment(cost_matrix):
+    """
+    Simple linear assignment implementation as fallback for scipy.optimize.linear_sum_assignment
+    """
+    try:
+        from scipy.optimize import linear_sum_assignment
+        return linear_sum_assignment(cost_matrix)
+    except ImportError:
+        # Simple greedy assignment as fallback
+        assignments = []
+        cost_matrix = cost_matrix.copy()
+        
+        for _ in range(min(cost_matrix.shape)):
+            # Find minimum cost
+            min_idx = np.unravel_index(np.argmin(cost_matrix), cost_matrix.shape)
+            assignments.append(min_idx)
+            
+            # Set row and column to infinity
+            cost_matrix[min_idx[0], :] = np.inf
+            cost_matrix[:, min_idx[1]] = np.inf
+        
+        if assignments:
+            return np.array(assignments).T
+        else:
+            return np.array([[], []], dtype=int)
+
+
+def iou_batch(bb_test, bb_gt):
+    """
+    From SORT: Computes IOU between two bboxes in the form [x1,y1,x2,y2]
+    """
+    bb_gt = np.expand_dims(bb_gt, 0)
+    bb_test = np.expand_dims(bb_test, 1)
+    
+    xx1 = np.maximum(bb_test[..., 0], bb_gt[..., 0])
+    yy1 = np.maximum(bb_test[..., 1], bb_gt[..., 1])
+    xx2 = np.minimum(bb_test[..., 2], bb_gt[..., 2])
+    yy2 = np.minimum(bb_test[..., 3], bb_gt[..., 3])
+    w = np.maximum(0., xx2 - xx1)
+    h = np.maximum(0., yy2 - yy1)
+    wh = w * h
+    o = wh / ((bb_test[..., 2] - bb_test[..., 0]) * (bb_test[..., 3] - bb_test[..., 1])                                      
+        + (bb_gt[..., 2] - bb_gt[..., 0]) * (bb_gt[..., 3] - bb_gt[..., 1]) - wh)                                              
+    return o  
+
+
+def associate_detections_to_trackers(detections, trackers, iou_threshold=0.3):
+    """
+    Assigns detections to tracked object (both represented as bounding boxes)
+    Returns 3 lists of matches, unmatched_detections and unmatched_trackers
+    """
+    if len(trackers) == 0:
+        return np.empty((0, 2), dtype=int), np.arange(len(detections)), np.empty((0, 5), dtype=int)
+
+    iou_matrix = iou_batch(detections, trackers)
+
+    if min(iou_matrix.shape) > 0:
+        a = (iou_matrix > iou_threshold).astype(np.int32)
+        if a.sum(1).max() == 1 and a.sum(0).max() == 1:
+            matched_indices = np.stack(np.where(a), axis=1)
+        else:
+            matched_indices = linear_assignment(-iou_matrix)
+            matched_indices = np.array(list(zip(*matched_indices)))
+    else:
+        matched_indices = np.empty(shape=(0, 2))
+
+    unmatched_detections = []
+    for d, det in enumerate(detections):
+        if d not in matched_indices[:, 0]:
+            unmatched_detections.append(d)
+    unmatched_trackers = []
+    for t, trk in enumerate(trackers):
+        if t not in matched_indices[:, 1]:
+            unmatched_trackers.append(t)
+
+    # filter out matched with low IOU
+    matches = []
+    for m in matched_indices:
+        if iou_matrix[m[0], m[1]] < iou_threshold:
+            unmatched_detections.append(m[0])
+            unmatched_trackers.append(m[1])
+        else:
+            matches.append(m.reshape(1, 2))
+    
+    if len(matches) == 0:
+        matches = np.empty((0, 2), dtype=int)
+    else:
+        matches = np.concatenate(matches, axis=0)
+
+    return matches, np.array(unmatched_detections), np.array(unmatched_trackers)
+
+
+class Sort:
+    """
+    SORT: Simple, online, and realtime tracking of multiple objects in a video sequence.
+    """
+    def __init__(self, max_age=1, min_hits=3, iou_threshold=0.3):
+        """
+        Sets key parameters for SORT
+        """
+        self.max_age = max_age
+        self.min_hits = min_hits
+        self.iou_threshold = iou_threshold
+        self.trackers = []
+        self.frame_count = 0
+
+    def update(self, dets=np.empty((0, 5))):
+        """
+        Params:
+          dets - a numpy array of detections in the format [[x1,y1,x2,y2,score],[x1,y1,x2,y2,score],...]
+        Requires: this method must be called once for each frame even with empty detections 
+        (use np.empty((0, 5)) for frames without detections).
+        Returns the a similar array, where the last column is the object ID.
+
+        NOTE: The number of objects returned may differ from the number of detections provided.
+        """
+        self.frame_count += 1
+        
+        # get predicted locations from existing trackers.
+        trks = np.zeros((len(self.trackers), 5))
+        to_del = []
+        ret = []
+        for t, trk in enumerate(trks):
+            pos = self.trackers[t].predict()[0]
+            trk[:] = [pos[0], pos[1], pos[2], pos[3], 0]
+            if np.any(np.isnan(pos)):
+                to_del.append(t)
+        trks = np.ma.compress_rows(np.ma.masked_invalid(trks))
+        for t in reversed(to_del):
+            self.trackers.pop(t)
+        
+        matched, unmatched_dets, unmatched_trks = associate_detections_to_trackers(dets, trks, self.iou_threshold)
+
+        # update matched trackers with assigned detections
+        for m in matched:
+            self.trackers[m[1]].update(dets[m[0], :])
+
+        # create and initialise new trackers for unmatched detections
+        for i in unmatched_dets:
+            trk = KalmanBoxTracker(dets[i, :])
+            self.trackers.append(trk)
+        
+        i = len(self.trackers)
+        for trk in reversed(self.trackers):
+            d = trk.get_state()[0]
+            if (trk.time_since_update < 1) and (trk.hit_streak >= self.min_hits or self.frame_count <= self.min_hits):
+                ret.append(np.concatenate((d, [trk.id+1])).reshape(1, -1)) # +1 as MOT benchmark requires positive
+            i -= 1
+            # remove dead tracklet
+            if trk.time_since_update > self.max_age:
+                self.trackers.pop(i)
+        
+        if len(ret) > 0:
+            return np.concatenate(ret)
+        return np.empty((0, 5))
+
 
 class VideoDetector:
     """
@@ -36,23 +330,33 @@ class VideoDetector:
     
     def __init__(self, 
                  model_path: str = None, 
-                 confidence_threshold: float = None):
+                 confidence_threshold: float = None,
+                 enable_tracking: bool = True):
         """
         Initialize the VideoDetector with configurable parameters.
         
         Args:
             model_path: Path to YOLO model file (defaults to Config.DEFAULT_MODEL)
             confidence_threshold: Detection confidence threshold (defaults to Config.CONFIDENCE_THRESHOLD)
+            enable_tracking: Enable object tracking for unique vehicle identification
         """
         # Use config defaults if not specified
         self.model_path = model_path or Config.DEFAULT_MODEL
         self.confidence_threshold = confidence_threshold or Config.CONFIDENCE_THRESHOLD
         self.model = None
+        self.enable_tracking = enable_tracking
         
         # Load configuration from Config class
         self.vehicle_classes = list(Config.VEHICLE_CLASSES.keys())
         self.class_names = Config.VEHICLE_CLASSES
         self.colors = Config.DETECTION_COLORS
+        
+        # Initialize tracking system
+        if self.enable_tracking:
+            self.tracker = Sort(max_age=30, min_hits=3, iou_threshold=0.3)
+            self.track_colors = {}  # Store colors for each track ID
+            self.unique_vehicle_count = 0
+            self.tracked_vehicles = set()  # Set to store unique vehicle IDs
         
         # Initialize components
         self.setup_device()
@@ -93,13 +397,20 @@ class VideoDetector:
         self.logger = logging.getLogger(__name__)
 
     def initialize_statistics(self):
-        """Initialize detection statistics tracking."""
+        """Initialize detection statistics tracking with tracking support."""
         self.detection_stats = {
             'total_frames': 0,
             'detections_per_frame': [],
             'processing_times': [],
             'vehicle_counts': {cls: 0 for cls in self.class_names.values()}
         }
+        
+        # Initialize tracking-specific statistics if tracking is enabled
+        if self.enable_tracking:
+            self.detection_stats.update({
+                'unique_vehicle_counts': {cls: 0 for cls in self.class_names.values()},
+                'tracked_vehicles_by_class': {cls: set() for cls in self.class_names.values()}
+            })
 
     def ensure_model_available(self):
         """
@@ -216,16 +527,145 @@ class VideoDetector:
             self.logger.error(f"Failed to load model: {e}")
             raise
 
-    def detect_vehicles(self, frame: np.ndarray) -> List[Dict]:
+    def detect_and_track_vehicles(self, frame: np.ndarray) -> List[Dict]:
         """
-        Detect vehicles in a single frame with performance tracking.
+        Detect and track vehicles in a single frame with unique ID assignment.
         
         Args:
             frame: Input frame as numpy array
             
         Returns:
-            List of detection dictionaries with bbox, confidence, and class info
+            List of detection dictionaries with bbox, confidence, class info, and track ID
         """
+        start_time = time.time()
+        
+        # Run YOLO inference with configured parameters
+        results = self.model(frame, conf=self.confidence_threshold, verbose=False)
+        detections = self._parse_detection_results(results)
+        
+        if self.enable_tracking and detections:
+            # Convert detections to format expected by SORT tracker
+            dets = self._convert_detections_to_sort_format(detections)
+            
+            # Update tracker with new detections
+            tracked_objects = self.tracker.update(dets)
+            
+            # Convert tracked objects back to detection format with track IDs
+            detections = self._convert_tracked_objects_to_detections(tracked_objects, detections)
+            
+            # Update unique vehicle tracking
+            for detection in detections:
+                if 'track_id' in detection:
+                    if detection['track_id'] not in self.tracked_vehicles:
+                        self.tracked_vehicles.add(detection['track_id'])
+                        self.unique_vehicle_count += 1
+        else:
+            # Update tracker even with empty detections to maintain state
+            if self.enable_tracking:
+                self.tracker.update(np.empty((0, 5)))
+        
+        # Track performance
+        processing_time = time.time() - start_time
+        self.detection_stats['processing_times'].append(processing_time)
+        
+        return detections
+
+    def _convert_detections_to_sort_format(self, detections: List[Dict]) -> np.ndarray:
+        """Convert detection list to SORT-compatible numpy array format."""
+        if not detections:
+            return np.empty((0, 5))
+        
+        sort_detections = []
+        for detection in detections:
+            x1, y1, x2, y2 = detection['bbox']
+            confidence = detection['confidence']
+            sort_detections.append([x1, y1, x2, y2, confidence])
+        
+        return np.array(sort_detections)
+
+    def _convert_tracked_objects_to_detections(self, tracked_objects: np.ndarray, 
+                                              original_detections: List[Dict]) -> List[Dict]:
+        """Convert SORT tracked objects back to detection dictionary format."""
+        if len(tracked_objects) == 0:
+            return []
+        
+        tracked_detections = []
+        
+        for track in tracked_objects:
+            x1, y1, x2, y2, track_id = track
+            track_id = int(track_id)
+            
+            # Find the closest original detection to associate class information
+            best_detection = self._find_closest_detection(
+                [x1, y1, x2, y2], original_detections
+            )
+            
+            if best_detection:
+                detection = {
+                    'bbox': [int(x1), int(y1), int(x2), int(y2)],
+                    'confidence': best_detection['confidence'],
+                    'class_id': best_detection['class_id'],
+                    'class_name': best_detection['class_name'],
+                    'track_id': track_id
+                }
+                tracked_detections.append(detection)
+        
+        return tracked_detections
+
+    def _find_closest_detection(self, bbox: List[float], 
+                               detections: List[Dict]) -> Optional[Dict]:
+        """Find the detection with highest IoU to the given bbox."""
+        if not detections:
+            return None
+        
+        max_iou = 0
+        best_detection = None
+        
+        for detection in detections:
+            iou = self._calculate_iou(bbox, detection['bbox'])
+            if iou > max_iou:
+                max_iou = iou
+                best_detection = detection
+        
+        return best_detection if max_iou > 0.1 else detections[0]  # Fallback to first detection
+
+    def _calculate_iou(self, bbox1: List[float], bbox2: List[float]) -> float:
+        """Calculate Intersection over Union (IoU) between two bounding boxes."""
+        x1_1, y1_1, x2_1, y2_1 = bbox1
+        x1_2, y1_2, x2_2, y2_2 = bbox2
+        
+        # Calculate intersection
+        x1_i = max(x1_1, x1_2)
+        y1_i = max(y1_1, y1_2)
+        x2_i = min(x2_1, x2_2)
+        y2_i = min(y2_1, y2_2)
+        
+        if x2_i <= x1_i or y2_i <= y1_i:
+            return 0.0
+        
+        intersection = (x2_i - x1_i) * (y2_i - y1_i)
+        
+        # Calculate union
+        area1 = (x2_1 - x1_1) * (y2_1 - y1_1)
+        area2 = (x2_2 - x1_2) * (y2_2 - y1_2)
+        union = area1 + area2 - intersection
+        
+        return intersection / union if union > 0 else 0.0
+
+    def detect_vehicles(self, frame: np.ndarray) -> List[Dict]:
+        """
+        Detect vehicles in a single frame with optional tracking.
+        
+        Args:
+            frame: Input frame as numpy array
+            
+        Returns:
+            List of detection dictionaries with bbox, confidence, class info, and optional track ID
+        """
+        if self.enable_tracking:
+            return self.detect_and_track_vehicles(frame)
+        
+        # Original detection without tracking
         start_time = time.time()
         
         # Run YOLO inference with configured parameters
@@ -284,18 +724,47 @@ class VideoDetector:
         return annotated_frame
 
     def _draw_single_detection(self, frame: np.ndarray, detection: Dict):
-        """Draw a single detection box and label."""
+        """Draw a single detection box and label with optional track ID."""
         x1, y1, x2, y2 = detection['bbox']
         confidence = detection['confidence']
         class_name = detection['class_name']
-        color = self.colors.get(class_name, self.colors['default'])
+        
+        # Get track ID if available
+        track_id = detection.get('track_id', None)
+        
+        # Use track-specific color if tracking is enabled
+        if self.enable_tracking and track_id is not None:
+            color = self._get_track_color(track_id, class_name)
+        else:
+            color = self.colors.get(class_name, self.colors['default'])
         
         # Draw bounding box
         cv2.rectangle(frame, (x1, y1), (x2, y2), color, Config.BOX_THICKNESS)
         
-        # Draw label with background
-        label = f"{class_name} {confidence:.2f}"
+        # Create label with track ID
+        if track_id is not None:
+            label = f"{class_name} ID:{track_id} {confidence:.2f}"
+        else:
+            label = f"{class_name} {confidence:.2f}"
+        
         self._draw_label_with_background(frame, label, (x1, y1), color)
+
+    def _get_track_color(self, track_id: int, class_name: str) -> Tuple[int, int, int]:
+        """Get a consistent color for a track ID."""
+        if track_id not in self.track_colors:
+            # Generate a unique color based on track ID
+            np.random.seed(track_id)
+            base_color = self.colors.get(class_name, self.colors['default'])
+            
+            # Add some variation to the base color
+            variation = 50
+            r = max(0, min(255, base_color[2] + np.random.randint(-variation, variation)))
+            g = max(0, min(255, base_color[1] + np.random.randint(-variation, variation)))
+            b = max(0, min(255, base_color[0] + np.random.randint(-variation, variation)))
+            
+            self.track_colors[track_id] = (b, g, r)  # BGR format for OpenCV
+        
+        return self.track_colors[track_id]
 
     def _draw_label_with_background(self, frame: np.ndarray, label: str, position: tuple, color: tuple):
         """Draw text label with contrasting background."""
@@ -326,7 +795,7 @@ class VideoDetector:
     
     def add_info_overlay(self, frame: np.ndarray, detections: List[Dict], fps: float) -> np.ndarray:
         """
-        Add comprehensive information overlay to the frame.
+        Add comprehensive information overlay to the frame with tracking stats.
         
         Args:
             frame: Input frame
@@ -342,10 +811,30 @@ class VideoDetector:
         # Prepare information lines
         info_lines = [
             f"FPS: {fps:.1f}",
-            f"Total Vehicles: {len(detections)}",
+            f"Current Detections: {len(detections)}",
             *[f"{vehicle_type.capitalize()}s: {count}" 
               for vehicle_type, count in vehicle_counts.items()]
         ]
+        
+        # Add tracking information
+        if self.enable_tracking:
+            active_tracks = len([d for d in detections if 'track_id' in d])
+            
+            # Get current unique counts from detection_stats
+            unique_counts = self.detection_stats.get('unique_vehicle_counts', {})
+            total_unique = sum(unique_counts.values()) if unique_counts else 0
+            
+            info_lines.extend([
+                "-" * 15,
+                f"Active Tracks: {active_tracks}",
+                f"Unique Vehicles: {total_unique}"
+            ])
+            
+            # Add unique counts by type if any exist
+            if unique_counts:
+                for vehicle_type, count in unique_counts.items():
+                    if count > 0:
+                        info_lines.append(f"Unique {vehicle_type.capitalize()}s: {count}")
         
         self._draw_info_panel(frame, info_lines)
         return frame
@@ -377,7 +866,7 @@ class VideoDetector:
             )
 
     def update_statistics(self, detections: List[Dict]):
-        """Update comprehensive detection statistics."""
+        """Update comprehensive detection statistics with tracking support."""
         self.detection_stats['total_frames'] += 1
         self.detection_stats['detections_per_frame'].append(len(detections))
         
@@ -385,6 +874,16 @@ class VideoDetector:
         for detection in detections:
             class_name = detection['class_name']
             self.detection_stats['vehicle_counts'][class_name] += 1
+            
+            # Update tracking statistics if tracking is enabled and track_id exists
+            if self.enable_tracking and 'track_id' in detection:
+                track_id = detection['track_id']
+                
+                # Check if this track ID is new for this vehicle class
+                if track_id not in self.detection_stats['tracked_vehicles_by_class'][class_name]:
+                    self.detection_stats['tracked_vehicles_by_class'][class_name].add(track_id)
+                    self.detection_stats['unique_vehicle_counts'][class_name] += 1
+                    self.logger.debug(f"New {class_name} tracked: ID {track_id}. Total unique {class_name}s: {self.detection_stats['unique_vehicle_counts'][class_name]}")
     
     def process_video(self, 
                      source: str, 
@@ -537,11 +1036,11 @@ class VideoDetector:
         }
 
     def _generate_final_statistics(self, processing_stats: Dict) -> Dict:
-        """Generate comprehensive final statistics."""
+        """Generate comprehensive final statistics with tracking information."""
         total_time = processing_stats['processing_time']
         frames_processed = processing_stats['frames_processed']
         
-        return {
+        stats = {
             'total_frames_processed': frames_processed,
             'total_processing_time': total_time,
             'average_fps': frames_processed / total_time if total_time > 0 else 0,
@@ -550,14 +1049,49 @@ class VideoDetector:
             'vehicle_counts_by_type': self.detection_stats['vehicle_counts'].copy(),
             'avg_detections_per_frame': np.mean(self.detection_stats['detections_per_frame']) if self.detection_stats['detections_per_frame'] else 0
         }
+        
+        # Add tracking statistics
+        if self.enable_tracking:
+            unique_counts = self.detection_stats.get('unique_vehicle_counts', {})
+            unique_total = sum(unique_counts.values()) if unique_counts else self.unique_vehicle_count
+            
+            stats.update({
+                'tracking_enabled': True,
+                'unique_vehicles_total': unique_total,
+                'unique_vehicle_counts_by_type': unique_counts,
+                'active_tracks': len(self.tracker.trackers) if hasattr(self.tracker, 'trackers') else 0
+            })
+        else:
+            stats['tracking_enabled'] = False
+        
+        return stats
 
     def _log_processing_summary(self, stats: Dict):
-        """Log comprehensive processing summary."""
+        """Log comprehensive processing summary with tracking information."""
         self.logger.info("Processing completed:")
         self.logger.info(f"  Frames processed: {stats['total_frames_processed']}")
         self.logger.info(f"  Average FPS: {stats['average_fps']:.2f}")
-        self.logger.info(f"  Total vehicles detected: {stats['total_vehicle_detections']}")
-        self.logger.info(f"  Vehicle breakdown: {stats['vehicle_counts_by_type']}")
+        
+        if stats.get('tracking_enabled', False):
+            self.logger.info(f"  Total detections: {stats['total_vehicle_detections']}")
+            self.logger.info(f"  Unique vehicles tracked: {stats['unique_vehicles_total']}")
+            self.logger.info(f"  Detection breakdown: {stats['vehicle_counts_by_type']}")
+            
+            # Log unique vehicle breakdown with better formatting
+            unique_breakdown = stats.get('unique_vehicle_counts_by_type', {})
+            if unique_breakdown:
+                # Filter out zero counts for cleaner display
+                non_zero_unique = {k: v for k, v in unique_breakdown.items() if v > 0}
+                if non_zero_unique:
+                    self.logger.info(f"  Unique vehicle breakdown: {non_zero_unique}")
+                else:
+                    self.logger.info("  Unique vehicle breakdown: No unique vehicles tracked yet")
+            
+            self.logger.info(f"  Active tracks at end: {stats['active_tracks']}")
+        else:
+            self.logger.info(f"  Total vehicles detected: {stats['total_vehicle_detections']}")
+            self.logger.info(f"  Vehicle breakdown: {stats['vehicle_counts_by_type']}")
+            self.logger.info("  Note: Tracking was disabled - counts may include duplicates")
     
     def benchmark_model(self, test_video: str, num_frames: int = 100) -> Dict:
         """
@@ -664,7 +1198,8 @@ def main():
         # Initialize detector with configuration
         detector = VideoDetector(
             model_path=args.model,
-            confidence_threshold=args.confidence
+            confidence_threshold=args.confidence,
+            enable_tracking=not args.no_tracking
         )
         
         if args.benchmark:
@@ -686,8 +1221,9 @@ def create_argument_parser() -> argparse.ArgumentParser:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  %(prog)s --source 0                          # Use webcam
-  %(prog)s --source video.mp4 --output out.mp4 # Process video file
+  %(prog)s --source 0                          # Use webcam with tracking
+  %(prog)s --source video.mp4 --output out.mp4 # Process video file with tracking
+  %(prog)s --source video.mp4 --no-tracking    # Process without tracking
   %(prog)s --source video.mp4 --benchmark      # Benchmark model
   %(prog)s --model models/yolo11x.pt --confidence 0.8  # High accuracy mode
         """
@@ -704,6 +1240,10 @@ Examples:
                        help=f'YOLO model path (default: {Config.DEFAULT_MODEL})')
     parser.add_argument('--confidence', '-c', type=float, default=Config.CONFIDENCE_THRESHOLD,
                        help=f'Confidence threshold (0.0-1.0, default: {Config.CONFIDENCE_THRESHOLD})')
+    
+    # Tracking options
+    parser.add_argument('--no-tracking', action='store_true',
+                       help='Disable object tracking (may cause duplicate counting)')
     
     # Display options
     parser.add_argument('--no-display', action='store_true',

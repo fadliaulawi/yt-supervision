@@ -137,6 +137,17 @@ def save_analysis_results(stats, config, start_time=None):
             'config': config
         }
         
+        # Add tracking statistics if available
+        if stats.get('tracking_enabled', False):
+            new_analysis.update({
+                'tracking_enabled': True,
+                'unique_vehicles_total': stats.get('unique_vehicles_total', 0),
+                'unique_vehicle_counts_by_type': stats.get('unique_vehicle_counts_by_type', {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}),
+                'active_tracks': stats.get('active_tracks', 0)
+            })
+        else:
+            new_analysis['tracking_enabled'] = False
+        
         # Ensure logs directory exists
         Path("logs").mkdir(exist_ok=True)
         
@@ -162,11 +173,24 @@ def save_analysis_results(stats, config, start_time=None):
         
         # Combine detection counts
         combined_counts = {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+        combined_unique_counts = {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+        total_unique_vehicles = 0
+        tracking_analyses = 0
+        
         for analysis in daily_data['analyses']:
+            # Regular detection counts
             for vehicle_type in combined_counts:
                 combined_counts[vehicle_type] += analysis['detection_counts'].get(vehicle_type, 0)
+            
+            # Unique tracking counts if available
+            if analysis.get('tracking_enabled', False):
+                tracking_analyses += 1
+                unique_counts = analysis.get('unique_vehicle_counts_by_type', {})
+                for vehicle_type in combined_unique_counts:
+                    combined_unique_counts[vehicle_type] += unique_counts.get(vehicle_type, 0)
+                total_unique_vehicles += analysis.get('unique_vehicles_total', 0)
         
-        daily_data['summary'] = {
+        daily_summary = {
             'date_formatted': datetime.strptime(today, "%Y%m%d").strftime("%A, %B %d, %Y"),
             'total_analyses': len(daily_data['analyses']),
             'total_detections': total_detections,
@@ -175,6 +199,16 @@ def save_analysis_results(stats, config, start_time=None):
             'combined_detection_counts': combined_counts,
             'last_updated': analysis_end.isoformat()
         }
+        
+        # Add tracking summary if any analysis used tracking
+        if tracking_analyses > 0:
+            daily_summary.update({
+                'tracking_enabled_analyses': tracking_analyses,
+                'total_unique_vehicles': total_unique_vehicles,
+                'combined_unique_counts': combined_unique_counts
+            })
+        
+        daily_data['summary'] = daily_summary
         
         # Save updated daily data
         with open(log_file, 'w') as f:

@@ -63,7 +63,8 @@ class YouTubeVideoWatcher:
         """
         self.detector = VideoDetector(
             model_path=model_path,
-            confidence_threshold=confidence_threshold
+            confidence_threshold=confidence_threshold,
+            enable_tracking=True
         )
         self.quality = quality
         self.logger = logging.getLogger(__name__)
@@ -243,8 +244,8 @@ class YouTubeVideoWatcher:
                 
                 frame_count += 1
                 
-                # Detect vehicles
-                detections = self.detector.detect_vehicles(frame)
+                # Detect and track vehicles (uses tracking if enabled)
+                detections = self.detector.detect_and_track_vehicles(frame)
                 
                 # Draw detections
                 annotated_frame = self.detector.draw_detections(frame, detections)
@@ -307,22 +308,39 @@ class YouTubeVideoWatcher:
         total_time = time.time() - start_time
         avg_fps = frame_count / total_time if total_time > 0 else 0
         
+        # Build statistics from detector data
+        total_detections = sum(self.detector.detection_stats['vehicle_counts'].values())
+        vehicle_counts = self.detector.detection_stats['vehicle_counts'].copy()
+        
         stats = {
             'video_info': video_info,
             'total_frames_processed': frame_count,
             'total_analysis_time': total_time,
             'time_elapsed_formatted': self._format_time(total_time),
             'average_fps': avg_fps,
-            'total_vehicle_detections': sum(self.detector.detection_stats['vehicle_counts'].values()),
-            'vehicle_counts_by_type': self.detector.detection_stats['vehicle_counts'].copy(),
+            'total_vehicle_detections': total_detections,
+            'vehicle_counts_by_type': vehicle_counts,
             'avg_detections_per_frame': (
-                sum(self.detector.detection_stats['vehicle_counts'].values()) / frame_count 
-                if frame_count > 0 else 0
+                total_detections / frame_count if frame_count > 0 else 0
             ),
             'analysis_start_time': time.strftime('%Y-%m-%d %H:%M:%S', time.localtime(start_time)),
             'analysis_end_time': time.strftime('%Y-%m-%d %H:%M:%S'),
             'processing_rate': frame_count / 60 if total_time > 60 else frame_count  # frames per minute or total frames
         }
+        
+        # Add tracking statistics if tracking is enabled
+        if self.detector.enable_tracking:
+            unique_counts = self.detector.detection_stats.get('unique_vehicle_counts', {})
+            unique_total = sum(unique_counts.values()) if unique_counts else self.detector.unique_vehicle_count
+            
+            stats.update({
+                'tracking_enabled': True,
+                'unique_vehicles_total': unique_total,
+                'unique_vehicle_counts_by_type': unique_counts,
+                'active_tracks': len(self.detector.tracker.trackers) if hasattr(self.detector.tracker, 'trackers') else 0
+            })
+        else:
+            stats['tracking_enabled'] = False
         
         self.logger.info("Analysis completed:")
         self.logger.info(f"  Video: {safe_log_message(video_info.get('title', 'Unknown'))}")

@@ -288,6 +288,9 @@ class StreamlitDashboard:
                     total_frames = 0
                     total_duration = 0.0
                     combined_detection_counts = {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+                    combined_unique_counts = {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+                    total_unique_vehicles = 0
+                    tracking_enabled_count = 0
                     latest_config = None
                     
                     for analysis in today_summary['analyses']:
@@ -299,6 +302,14 @@ class StreamlitDashboard:
                         detection_counts = analysis.get('detection_counts', {})
                         for vehicle_type in combined_detection_counts:
                             combined_detection_counts[vehicle_type] += detection_counts.get(vehicle_type, 0)
+                        
+                        # Add unique counts if tracking was enabled for this analysis
+                        if analysis.get('tracking_enabled', False):
+                            tracking_enabled_count += 1
+                            unique_counts = analysis.get('unique_vehicle_counts_by_type', {})
+                            for vehicle_type in combined_unique_counts:
+                                combined_unique_counts[vehicle_type] += unique_counts.get(vehicle_type, 0)
+                            total_unique_vehicles += analysis.get('unique_vehicles_total', 0)
                         
                         # Keep the latest config for reference
                         if not latest_config:
@@ -313,6 +324,17 @@ class StreamlitDashboard:
                         'config': latest_config or {},
                         'is_combined': True
                     }
+                    
+                    # Add tracking data if any analysis used tracking
+                    if tracking_enabled_count > 0:
+                        combined_results.update({
+                            'tracking_enabled': True,
+                            'unique_vehicles_total': total_unique_vehicles,
+                            'unique_vehicle_counts_by_type': combined_unique_counts,
+                            'tracking_analyses_count': tracking_enabled_count
+                        })
+                    else:
+                        combined_results['tracking_enabled'] = False
 
                 if combined_results and len(today_summary['analyses']) > 1:
                     st.success(f"✅ Combined Daily Results ({len(today_summary['analyses'])} analyses)")
@@ -329,6 +351,12 @@ class StreamlitDashboard:
                         st.write(f"**Confidence:** {config.get('confidence', 'Unknown')}")
                         if config.get('url'):
                             st.write(f"**Source URL:** {config['url']}")
+                        
+                        # Show tracking status
+                        if results.get('tracking_enabled', False):
+                            st.write("**🎯 Object Tracking:** ✅ Enabled (Unique vehicle counting)")
+                        else:
+                            st.write("**🎯 Object Tracking:** ❌ Disabled (May include duplicates)")
                     
                     # Summary info
                     col1, col2, col3 = st.columns(3)
@@ -354,44 +382,60 @@ class StreamlitDashboard:
                         st.metric("🎬 Total Frames", 
                                  total_frames)
                     
-                    # Detection metrics
+                    # Detection metrics - show unique counts if available, otherwise regular counts
                     st.subheader("📊 Detection Breakdown")
                     
                     col1, col2, col3, col4 = st.columns(4)
                     
-                    detection_counts = results.get('detection_counts', {})
+                    # Use unique counts if tracking is enabled, otherwise use regular counts
+                    if results.get('tracking_enabled', False):
+                        counts_to_display = results.get('unique_vehicle_counts_by_type', {})
+                        if not any(counts_to_display.values()):  # If no unique counts, fall back to regular
+                            counts_to_display = results.get('detection_counts', {})
+                    else:
+                        counts_to_display = results.get('detection_counts', {})
+                    
                     with col1:
                         st.metric(
                             label="🚗 Cars",
-                            value=detection_counts.get('car', 0),
+                            value=counts_to_display.get('car', 0),
                             delta=None
                         )
                     
                     with col2:
                         st.metric(
                             label="🚛 Trucks",
-                            value=detection_counts.get('truck', 0),
+                            value=counts_to_display.get('truck', 0),
                             delta=None
                         )
                     
                     with col3:
                         st.metric(
                             label="🚌 Buses", 
-                            value=detection_counts.get('bus', 0),
+                            value=counts_to_display.get('bus', 0),
                             delta=None
                         )
                     
                     with col4:
                         st.metric(
                             label="🏍️ Motorcycles",
-                            value=detection_counts.get('motorcycle', 0),
+                            value=counts_to_display.get('motorcycle', 0),
                             delta=None
                         )
                     
-                    # Total detections
+                    # Total vehicles - use unique total if available, otherwise regular total
+                    if results.get('tracking_enabled', False):
+                        total_to_display = results.get('unique_vehicles_total', 0)
+                        if total_to_display == 0:  # If no unique total, fall back to regular
+                            total_to_display = results.get('total_detections', 0)
+                        total_label = "🎯 Total Unique Vehicles"
+                    else:
+                        total_to_display = results.get('total_detections', 0)
+                        total_label = "🎯 Total Vehicle Detections"
+                    
                     st.metric(
-                        label="🎯 Total Vehicles Detected",
-                        value=results.get('total_detections', 0),
+                        label=total_label,
+                        value=total_to_display,
                         delta=None
                     )
                     
@@ -401,9 +445,18 @@ class StreamlitDashboard:
                         
                         col1, col2 = st.columns(2)
                         
+                        # Use unique counts if tracking is enabled, otherwise use regular counts
+                        if results.get('tracking_enabled', False):
+                            counts = results.get('unique_vehicle_counts_by_type', {})
+                            if not any(counts.values()):  # If no unique counts, fall back to regular
+                                counts = results.get('detection_counts', {})
+                            chart_title_prefix = "🎯 Unique"
+                        else:
+                            counts = results.get('detection_counts', {})
+                            chart_title_prefix = "🚗"
+                        
                         with col1:
                             # Vehicle breakdown pie chart
-                            counts = results.get('detection_counts', {})
                             if sum(counts.values()) > 0:
                                 # Ensure consistent ordering for proper color mapping
                                 vehicle_types = ['car', 'truck', 'bus', 'motorcycle']
@@ -413,15 +466,14 @@ class StreamlitDashboard:
                                     fig_pie = px.pie(
                                         values=list(filtered_counts.values()),
                                         names=list(filtered_counts.keys()),
-                                        title="🚗 Vehicle Type Distribution",
+                                        title=f"{chart_title_prefix} Vehicle Type Distribution",
                                         color_discrete_map=self.VEHICLE_COLORS
                                     )
                                     fig_pie.update_layout(height=400)
                                     st.plotly_chart(fig_pie, use_container_width=True)
                         
                         with col2:
-                            # Summary stats chart
-                            # Ensure consistent ordering for proper color mapping
+                            # Summary stats bar chart
                             vehicle_types = ['car', 'truck', 'bus', 'motorcycle']
                             filtered_counts = {vtype: counts.get(vtype, 0) for vtype in vehicle_types if counts.get(vtype, 0) > 0}
                             
@@ -432,7 +484,7 @@ class StreamlitDashboard:
                                 fig_bar = px.bar(
                                     x=vehicles,
                                     y=counts_list,
-                                    title="🎯 Vehicle Detection Summary",
+                                    title=f"{chart_title_prefix} Vehicle Detection Summary",
                                     color=vehicles,
                                     color_discrete_map=self.VEHICLE_COLORS
                                 )
@@ -902,7 +954,7 @@ class StreamlitDashboard:
                 # Show running info
                 st.info("🟢 Analysis is currently running in OpenCV window. Press 'Q' in the video window to stop.")
                 if 'frames_processed' in status:
-                    st.info(f"� Frames processed: {status['frames_processed']}, Detections: {status.get('detections', 0)}")
+                    st.info(f"🖼️ Frames processed: {status['frames_processed']}, Detections: {status.get('detections', 0)}")
             else:
                 # Start new analysis - validate configuration first
                 if config['mode'] == 'youtube' and not config.get('url'):
