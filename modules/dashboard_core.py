@@ -8,6 +8,7 @@ import plotly.graph_objects as go
 import plotly.express as px
 from plotly.subplots import make_subplots
 import pandas as pd
+import glob
 
 import cv2
 import time
@@ -28,6 +29,14 @@ from .status_manager import set_analysis_starting, set_analysis_running, set_ana
 class StreamlitDashboard:
     """Main dashboard class for Streamlit interface."""
     
+    # Consistent color mapping for all vehicle types across all charts
+    VEHICLE_COLORS = {
+        'car': '#2E8B57',      # Sea Green
+        'truck': '#FF6347',    # Tomato Red
+        'bus': '#4169E1',      # Royal Blue
+        'motorcycle': '#FFD700' # Gold
+    }
+    
     def __init__(self):
         """Initialize the dashboard."""
         self.detector = None
@@ -37,6 +46,60 @@ class StreamlitDashboard:
         self.fps_history = []
         self.time_stamps = []
         self.analysis_running = False  # Instance-level flag for thread communication
+    
+    def get_daily_summary(self, date=None):
+        """Get summary of analyses for today from single daily log file."""
+        if date is None:
+            date = datetime.now().strftime("%Y%m%d")
+        
+        # Single daily log file
+        logs_dir = Path("logs")
+        daily_log_file = logs_dir / f"analysis_{date}.json"
+        
+        # Format date for display
+        try:
+            date_obj = datetime.strptime(date, "%Y%m%d")
+            date_formatted = date_obj.strftime("%A, %B %d, %Y")
+        except ValueError:
+            date_formatted = f"{date[:4]}-{date[4:6]}-{date[6:8]}"
+        
+        if not daily_log_file.exists():
+            return {
+                'date': date,
+                'date_formatted': date_formatted,
+                'total_analyses': 0,
+                'total_detections': 0,
+                'total_frames': 0,
+                'total_duration': 0.0,
+                'analyses': []
+            }
+        
+        try:
+            with open(daily_log_file, 'r') as f:
+                daily_data = json.load(f)
+            
+            # Return summary data
+            summary = daily_data.get('summary', {})
+            return {
+                'date': date,
+                'date_formatted': summary.get('date_formatted', date_formatted),
+                'total_analyses': summary.get('total_analyses', len(daily_data.get('analyses', []))),
+                'total_detections': summary.get('total_detections', 0),
+                'total_frames': summary.get('total_frames', 0),
+                'total_duration': summary.get('total_duration', 0.0),
+                'analyses': daily_data.get('analyses', [])
+            }
+            
+        except (json.JSONDecodeError, FileNotFoundError, KeyError):
+            return {
+                'date': date,
+                'date_formatted': date_formatted,
+                'total_analyses': 0,
+                'total_detections': 0,
+                'total_frames': 0,
+                'total_duration': 0.0,
+                'analyses': []
+            }
     
     def initialize_session_state(self):
         """Initialize session state variables - must be called from main thread."""
@@ -185,6 +248,208 @@ class StreamlitDashboard:
                     'confidence': confidence
                 }
     
+    def display_daily_progress(self):
+        """Display daily analysis progress information with detailed results."""
+        try:
+            today_summary = self.get_daily_summary()
+            
+            # Create an expander for daily progress
+            with st.expander("📊 Daily Analysis Tracker", expanded=False):
+                # Show recent analyses if any
+                if today_summary['analyses']:
+                    st.write("**Recent Analyses:**")
+                    for analysis in reversed(today_summary['analyses'][-3:]):  # Show last 3
+                        try:
+                            start_time = analysis['analysis_start_time'][11:19] if len(analysis['analysis_start_time']) > 19 else 'Unknown'
+                            mode = analysis.get('config', {}).get('mode', 'unknown')
+                            detections = analysis.get('total_detections', 0)
+                            st.write(f"• {start_time} | {mode} mode | 🚗 {detections} detections")
+                        except:
+                            mode = analysis.get('config', {}).get('mode', 'unknown')
+                            detections = analysis.get('total_detections', 0)
+                            st.write(f"• {mode} mode | 🚗 {detections} detections")
+                else:
+                    st.info("🌅 No analyses completed today yet!")
+                
+                # Display detailed results from current session or latest analysis
+                st.divider()
+                
+                # Get current session results or latest analysis
+                results = st.session_state.get('current_session_results')
+                if not results and today_summary['analyses']:
+                    # Use the most recent analysis from today
+                    results = today_summary['analyses'][-1]
+                
+                # Also calculate combined results from all analyses today
+                combined_results = None
+                if today_summary['analyses']:
+                    # Aggregate all analyses from today
+                    total_detections = 0
+                    total_frames = 0
+                    total_duration = 0.0
+                    combined_detection_counts = {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+                    latest_config = None
+                    
+                    for analysis in today_summary['analyses']:
+                        total_detections += analysis.get('total_detections', 0)
+                        total_frames += analysis.get('total_frames', 0)
+                        total_duration += analysis.get('duration_seconds', 0)
+                        
+                        # Add detection counts
+                        detection_counts = analysis.get('detection_counts', {})
+                        for vehicle_type in combined_detection_counts:
+                            combined_detection_counts[vehicle_type] += detection_counts.get(vehicle_type, 0)
+                        
+                        # Keep the latest config for reference
+                        if not latest_config:
+                            latest_config = analysis.get('config', {})
+                    
+                    combined_results = {
+                        'analysis_start_time': datetime.now().strftime("%d-%m-%Y"),
+                        'duration_seconds': total_duration,
+                        'total_frames': total_frames,
+                        'total_detections': total_detections,
+                        'detection_counts': combined_detection_counts,
+                        'config': latest_config or {},
+                        'is_combined': True
+                    }
+
+                if combined_results and len(today_summary['analyses']) > 1:
+                    st.success(f"✅ Combined Daily Results ({len(today_summary['analyses'])} analyses)")
+                    results = combined_results
+                elif results:
+                    st.success("✅ Latest Analysis Results")
+                
+                if results:
+                    # Configuration details
+                    with st.expander("🔧 Analysis Configuration"):
+                        config = results.get('config', {})
+                        st.write(f"**Mode:** {config.get('mode', 'Unknown')}")
+                        st.write(f"**Model:** {config.get('model_path', 'Unknown')}")
+                        st.write(f"**Confidence:** {config.get('confidence', 'Unknown')}")
+                        if config.get('url'):
+                            st.write(f"**Source URL:** {config['url']}")
+                    
+                    # Summary info
+                    col1, col2, col3 = st.columns(3)
+                    with col1:
+                        # Handle combined results vs single analysis
+                        if results.get('is_combined'):
+                            st.metric("📅 Date Range", results.get('analysis_start_time', 'Unknown'))
+                        else:
+                            # Safely get analysis start time with fallback
+                            start_time_str = "Unknown"
+                            if 'analysis_start_time' in results:
+                                try:
+                                    start_time_str = datetime.fromisoformat(results['analysis_start_time']).strftime("%Y-%m-%d %H:%M")
+                                except (ValueError, TypeError):
+                                    start_time_str = "Invalid Date"
+                            st.metric("📅 Analysis Date", start_time_str)
+                    with col2:
+                        duration = results.get('duration_seconds', 0)
+                        st.metric("⏱️ Duration", 
+                                 f"{duration:.1f}s")
+                    with col3:
+                        total_frames = results.get('total_frames', 0)
+                        st.metric("🎬 Total Frames", 
+                                 total_frames)
+                    
+                    # Detection metrics
+                    st.subheader("📊 Detection Breakdown")
+                    
+                    col1, col2, col3, col4 = st.columns(4)
+                    
+                    detection_counts = results.get('detection_counts', {})
+                    with col1:
+                        st.metric(
+                            label="🚗 Cars",
+                            value=detection_counts.get('car', 0),
+                            delta=None
+                        )
+                    
+                    with col2:
+                        st.metric(
+                            label="🚛 Trucks",
+                            value=detection_counts.get('truck', 0),
+                            delta=None
+                        )
+                    
+                    with col3:
+                        st.metric(
+                            label="🚌 Buses", 
+                            value=detection_counts.get('bus', 0),
+                            delta=None
+                        )
+                    
+                    with col4:
+                        st.metric(
+                            label="🏍️ Motorcycles",
+                            value=detection_counts.get('motorcycle', 0),
+                            delta=None
+                        )
+                    
+                    # Total detections
+                    st.metric(
+                        label="🎯 Total Vehicles Detected",
+                        value=results.get('total_detections', 0),
+                        delta=None
+                    )
+                    
+                    # Show charts if we have detection data
+                    if results.get('total_detections', 0) > 0:
+                        st.subheader("📈 Analysis Charts")
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            # Vehicle breakdown pie chart
+                            counts = results.get('detection_counts', {})
+                            if sum(counts.values()) > 0:
+                                # Ensure consistent ordering for proper color mapping
+                                vehicle_types = ['car', 'truck', 'bus', 'motorcycle']
+                                filtered_counts = {vtype: counts.get(vtype, 0) for vtype in vehicle_types if counts.get(vtype, 0) > 0}
+                                
+                                if filtered_counts:
+                                    fig_pie = px.pie(
+                                        values=list(filtered_counts.values()),
+                                        names=list(filtered_counts.keys()),
+                                        title="🚗 Vehicle Type Distribution",
+                                        color_discrete_map=self.VEHICLE_COLORS
+                                    )
+                                    fig_pie.update_layout(height=400)
+                                    st.plotly_chart(fig_pie, use_container_width=True)
+                        
+                        with col2:
+                            # Summary stats chart
+                            # Ensure consistent ordering for proper color mapping
+                            vehicle_types = ['car', 'truck', 'bus', 'motorcycle']
+                            filtered_counts = {vtype: counts.get(vtype, 0) for vtype in vehicle_types if counts.get(vtype, 0) > 0}
+                            
+                            if filtered_counts:
+                                vehicles = list(filtered_counts.keys())
+                                counts_list = list(filtered_counts.values())
+                                
+                                fig_bar = px.bar(
+                                    x=vehicles,
+                                    y=counts_list,
+                                    title="🎯 Vehicle Detection Summary",
+                                    color=vehicles,
+                                    color_discrete_map=self.VEHICLE_COLORS
+                                )
+                                fig_bar.update_layout(
+                                    height=400,
+                                    xaxis_title="Vehicle Type",
+                                    yaxis_title="Count",
+                                    showlegend=False
+                                )
+                                st.plotly_chart(fig_bar, use_container_width=True)
+                else:
+                    st.info("📋 No analysis results available.")
+                    st.info("💡 Results will appear here after completing an analysis.")
+        
+        except Exception as e:
+            st.warning(f"Could not load daily progress: {e}")
+    
     def create_main_dashboard(self):
         """Create the main dashboard interface."""
         # Header
@@ -297,19 +562,19 @@ class StreamlitDashboard:
                 # Vehicle breakdown pie chart
                 counts = st.session_state.detection_counts
                 if sum(counts.values()) > 0:
-                    fig_pie = px.pie(
-                        values=list(counts.values()),
-                        names=list(counts.keys()),
-                        title="🚗 Vehicle Type Distribution",
-                        color_discrete_map={
-                            'car': '#2E8B57',
-                            'truck': '#FF6347', 
-                            'bus': '#4169E1',
-                            'motorcycle': '#FFD700'
-                        }
-                    )
-                    fig_pie.update_layout(height=400)
-                    st.plotly_chart(fig_pie, use_container_width=True)
+                    # Ensure consistent ordering for proper color mapping
+                    vehicle_types = ['car', 'truck', 'bus', 'motorcycle']
+                    filtered_counts = {vtype: counts.get(vtype, 0) for vtype in vehicle_types if counts.get(vtype, 0) > 0}
+                    
+                    if filtered_counts:
+                        fig_pie = px.pie(
+                            values=list(filtered_counts.values()),
+                            names=list(filtered_counts.keys()),
+                            title="🚗 Vehicle Type Distribution",
+                            color_discrete_map=self.VEHICLE_COLORS
+                        )
+                        fig_pie.update_layout(height=400)
+                        st.plotly_chart(fig_pie, use_container_width=True)
             
             with col2:
                 # Detection timeline
@@ -583,85 +848,6 @@ class StreamlitDashboard:
             set_analysis_error(str(e))
             return False
 
-    def display_analysis_results(self, results):
-        """Display analysis results from session state."""
-        if not results:
-            st.info("📋 No analysis results available in current session.")
-            st.info("💡 Results will appear here after completing an analysis.")
-            return
-        
-        st.success("✅ Displaying results from current session")
-        
-        # Summary info
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            # Safely get analysis start time with fallback
-            start_time_str = "Unknown"
-            if 'analysis_start_time' in results:
-                try:
-                    start_time_str = datetime.fromisoformat(results['analysis_start_time']).strftime("%Y-%m-%d %H:%M")
-                except (ValueError, TypeError):
-                    start_time_str = "Invalid Date"
-            
-            st.metric("📅 Analysis Date", start_time_str)
-        with col2:
-            duration = results.get('duration_seconds', 0)
-            st.metric("⏱️ Duration", 
-                     f"{duration:.1f}s")
-        with col3:
-            total_frames = results.get('total_frames', 0)
-            st.metric("🎬 Total Frames", 
-                     total_frames)
-        
-        # Detection metrics
-        st.subheader("📊 Detection Results")
-        
-        col1, col2, col3, col4 = st.columns(4)
-        
-        with col1:
-            st.metric(
-                label="🚗 Cars",
-                value=results['detection_counts']['car'],
-                delta=None
-            )
-        
-        with col2:
-            st.metric(
-                label="🚛 Trucks",
-                value=results['detection_counts']['truck'],
-                delta=None
-            )
-        
-        with col3:
-            st.metric(
-                label="🚌 Buses", 
-                value=results['detection_counts']['bus'],
-                delta=None
-            )
-        
-        with col4:
-            st.metric(
-                label="🏍️ Motorcycles",
-                value=results['detection_counts']['motorcycle'],
-                delta=None
-            )
-        
-        # Total detections
-        st.metric(
-            label="🎯 Total Vehicles Detected",
-            value=results['total_detections'],
-            delta=None
-        )
-        
-        # Configuration details
-        with st.expander("🔧 Analysis Configuration"):
-            config = results['config']
-            st.write(f"**Mode:** {config['mode']}")
-            st.write(f"**Model:** {config['model_path']}")
-            st.write(f"**Confidence:** {config['confidence']}")
-            if config.get('url'):
-                st.write(f"**Source URL:** {config['url']}")
-
     def cleanup_video_source(self):
         """Clean up video source and reset results."""
         cv2.destroyAllWindows()
@@ -699,11 +885,14 @@ class StreamlitDashboard:
         self.initialize_session_state()
         
         # Get configuration from sidebar
-        config = self.create_sidebar()
-        
+        config = self.create_sidebar()        
+
         # Create main dashboard
         start_button, stop_button = self.create_main_dashboard()
         
+        # Display daily progress information
+        self.display_daily_progress()
+
         # Handle start/stop buttons
         if start_button:
             # Check current status
@@ -761,20 +950,23 @@ class StreamlitDashboard:
             if 'frames_processed' in status:
                 st.write(f"📊 Processed: {status['frames_processed']} frames")
         elif status['status'] == 'completed':
-            st.write("✅ **Status:** Analysis completed - check results below")
             # Load results into session when analysis is completed
             if not st.session_state.current_session_results:
                 try:
-                    import glob
-                    # Look for analysis result files, not status files
-                    log_files = glob.glob("logs/analysis_????????_??????.json")
-                    if log_files:
-                        latest_file = max(log_files, key=lambda x: Path(x).stat().st_mtime)
-                        with open(latest_file, 'r') as f:
-                            results_data = json.load(f)
-                            # Validate that this is actually a results file (has detection_counts)
-                            if 'detection_counts' in results_data:
-                                st.session_state.current_session_results = results_data
+                    # Look for today's daily log file
+                    today = datetime.now().strftime("%Y%m%d")
+                    daily_log_file = f"logs/analysis_{today}.json"
+                    
+                    if os.path.exists(daily_log_file):
+                        with open(daily_log_file, 'r') as f:
+                            daily_data = json.load(f)
+                            
+                        # Get the latest analysis from today
+                        analyses = daily_data.get('analyses', [])
+                        if analyses:
+                            # Use the most recent analysis
+                            latest_analysis = analyses[-1]
+                            st.session_state.current_session_results = latest_analysis
                 except Exception:
                     pass
         elif status['status'] == 'error':
@@ -782,59 +974,7 @@ class StreamlitDashboard:
         else:
             st.write("🔴 **Status:** Ready for analysis")
         
-        # Display results from current session
-        self.display_analysis_results(st.session_state.current_session_results)
-        
-        # Show charts if we have data in current session
-        if st.session_state.current_session_results and st.session_state.current_session_results['total_detections'] > 0:
-            st.subheader("📈 Analysis Charts")
-            
-            col1, col2 = st.columns(2)
-            
-            with col1:
-                # Vehicle breakdown pie chart
-                counts = st.session_state.current_session_results['detection_counts']
-                if sum(counts.values()) > 0:
-                    fig_pie = px.pie(
-                        values=list(counts.values()),
-                        names=list(counts.keys()),
-                        title="🚗 Vehicle Type Distribution",
-                        color_discrete_map={
-                            'car': '#2E8B57',
-                            'truck': '#FF6347', 
-                            'bus': '#4169E1',
-                            'motorcycle': '#FFD700'
-                        }
-                    )
-                    fig_pie.update_layout(height=400)
-                    st.plotly_chart(fig_pie, use_container_width=True)
-            
-            with col2:
-                # Summary stats chart
-                vehicles = list(counts.keys())
-                counts_list = list(counts.values())
-                
-                fig_bar = px.bar(
-                    x=vehicles,
-                    y=counts_list,
-                    title="🎯 Vehicle Detection Summary",
-                    color=vehicles,
-                    color_discrete_map={
-                        'car': '#2E8B57',
-                        'truck': '#FF6347', 
-                        'bus': '#4169E1',
-                        'motorcycle': '#FFD700'
-                    }
-                )
-                fig_bar.update_layout(
-                    height=400,
-                    xaxis_title="Vehicle Type",
-                    yaxis_title="Count",
-                    showlegend=False
-                )
-                st.plotly_chart(fig_bar, use_container_width=True)
-        
         # Check for completed analysis
         status = self.check_analysis_status()
         if status['status'] == 'completed':
-            st.success("✅ Analysis completed! Results are displayed above.")
+            st.success("✅ Analysis completed! Check results in Daily Analysis Tracker above.")
