@@ -547,18 +547,27 @@ class VideoDetector:
             # Convert detections to format expected by SORT tracker
             dets = self._convert_detections_to_sort_format(detections)
             
+            # Store the number of trackers before update to detect new tracks
+            trackers_before = len(self.tracker.trackers)
+            
             # Update tracker with new detections
             tracked_objects = self.tracker.update(dets)
             
+            # Check for new tracks created
+            trackers_after = len(self.tracker.trackers)
+            if trackers_after > trackers_before:
+                # New tracks were created
+                new_tracks_count = trackers_after - trackers_before
+                self.unique_vehicle_count += new_tracks_count
+                
+                # Add the new track IDs to our set
+                for i in range(new_tracks_count):
+                    new_tracker = self.tracker.trackers[-(i+1)]  # Get the newly added trackers
+                    track_id = new_tracker.id + 1
+                    self.tracked_vehicles.add(track_id)
+            
             # Convert tracked objects back to detection format with track IDs
             detections = self._convert_tracked_objects_to_detections(tracked_objects, detections)
-            
-            # Update unique vehicle tracking
-            for detection in detections:
-                if 'track_id' in detection:
-                    if detection['track_id'] not in self.tracked_vehicles:
-                        self.tracked_vehicles.add(detection['track_id'])
-                        self.unique_vehicle_count += 1
         else:
             # Update tracker even with empty detections to maintain state
             if self.enable_tracking:
@@ -884,6 +893,18 @@ class VideoDetector:
                     self.detection_stats['tracked_vehicles_by_class'][class_name].add(track_id)
                     self.detection_stats['unique_vehicle_counts'][class_name] += 1
                     self.logger.debug(f"New {class_name} tracked: ID {track_id}. Total unique {class_name}s: {self.detection_stats['unique_vehicle_counts'][class_name]}")
+        
+        # Additional tracking statistics update - count all tracker IDs, not just active ones
+        if self.enable_tracking and hasattr(self, 'tracker'):
+            # Update unique counts by examining all existing trackers
+            for tracker in self.tracker.trackers:
+                track_id = tracker.id + 1  # SORT uses +1 for MOT benchmark compatibility
+                
+                # We need to determine the vehicle class for this tracker
+                # This is more complex since trackers don't store class info
+                # For now, we'll rely on the detection-based counting above
+                # and use the global unique_vehicle_count as the authoritative source
+                pass
     
     def process_video(self, 
                      source: str, 
@@ -1053,7 +1074,8 @@ class VideoDetector:
         # Add tracking statistics
         if self.enable_tracking:
             unique_counts = self.detection_stats.get('unique_vehicle_counts', {})
-            unique_total = sum(unique_counts.values()) if unique_counts else self.unique_vehicle_count
+            # Use the authoritative global count, but also provide per-class breakdown
+            unique_total = self.unique_vehicle_count  # This is the definitive count
             
             stats.update({
                 'tracking_enabled': True,
