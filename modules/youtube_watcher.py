@@ -247,17 +247,21 @@ class YouTubeVideoWatcher:
                 # Detect and track vehicles (uses tracking if enabled)
                 detections = self.detector.detect_and_track_vehicles(frame)
                 
-                # Draw detections
+                # Draw detections and center line for directional analysis
                 annotated_frame = self.detector.draw_detections(frame, detections)
+                
+                # Add center line for directional analysis
+                self.detector._draw_center_line(annotated_frame)
                 
                 # Calculate FPS
                 elapsed_time = time.time() - start_time
                 current_fps = frame_count / elapsed_time if elapsed_time > 0 else 0
                 
-                # Add YouTube info overlay
-                overlay_frame = self.add_youtube_overlay(
-                    annotated_frame, detections, current_fps, video_info
-                )
+                # Add comprehensive info overlay from VideoDetector
+                overlay_frame = self.detector.add_info_overlay(annotated_frame, detections, current_fps)
+                
+                # Add YouTube-specific info on top
+                overlay_frame = self.add_youtube_info(overlay_frame, video_info, elapsed_time)
                 
                 # Display frame
                 if display:
@@ -277,8 +281,8 @@ class YouTubeVideoWatcher:
                 if out:
                     out.write(overlay_frame)
                 
-                # Update statistics
-                self.detector.update_statistics(detections)
+                # Update statistics with frame width for directional counting
+                self.detector.update_statistics(detections, width)
                 
                 # Check duration limit
                 if max_duration and elapsed_time > max_duration:
@@ -312,6 +316,12 @@ class YouTubeVideoWatcher:
         total_detections = sum(self.detector.detection_stats['vehicle_counts'].values())
         vehicle_counts = self.detector.detection_stats['vehicle_counts'].copy()
         
+        # Get directional statistics from detector
+        directional_counts = self.detector.detection_stats.get('directional_counts', {
+            'left': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0},
+            'right': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+        })
+        
         stats = {
             'video_info': video_info,
             'total_frames_processed': frame_count,
@@ -320,6 +330,7 @@ class YouTubeVideoWatcher:
             'average_fps': avg_fps,
             'total_vehicle_detections': total_detections,
             'vehicle_counts_by_type': vehicle_counts,
+            'directional_counts': directional_counts,  # Add directional statistics
             'avg_detections_per_frame': (
                 total_detections / frame_count if frame_count > 0 else 0
             ),
@@ -333,10 +344,17 @@ class YouTubeVideoWatcher:
             unique_counts = self.detector.detection_stats.get('unique_vehicle_counts', {})
             unique_total = sum(unique_counts.values()) if unique_counts else self.detector.unique_vehicle_count
             
+            # Get unique directional statistics
+            unique_directional_counts = self.detector.detection_stats.get('unique_directional_counts', {
+                'left': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0},
+                'right': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+            })
+            
             stats.update({
                 'tracking_enabled': True,
                 'unique_vehicles_total': unique_total,
                 'unique_vehicle_counts_by_type': unique_counts,
+                'unique_directional_counts': unique_directional_counts,  # Add unique directional stats
                 'active_tracks': len(self.detector.tracker.trackers) if hasattr(self.detector.tracker, 'trackers') else 0
             })
         else:
@@ -350,7 +368,60 @@ class YouTubeVideoWatcher:
         self.logger.info(f"  Total vehicles detected: {stats['total_vehicle_detections']}")
         self.logger.info(f"  Vehicle breakdown: {stats['vehicle_counts_by_type']}")
         
+        # Log directional statistics
+        if stats.get('directional_counts'):
+            left_total = sum(stats['directional_counts'].get('left', {}).values())
+            right_total = sum(stats['directional_counts'].get('right', {}).values())
+            self.logger.info(f"  Directional analysis: Left={left_total}, Right={right_total}")
+        
         return stats
+    
+    def add_youtube_info(self, frame, video_info, elapsed_time):
+        """
+        Add YouTube-specific information overlay to the top of the frame.
+        
+        Args:
+            frame: Input frame (already has VideoDetector overlay)
+            video_info: YouTube video information
+            elapsed_time: Elapsed analysis time
+            
+        Returns:
+            Frame with YouTube info added
+        """
+        height, width = frame.shape[:2]
+        
+        # Create semi-transparent banner at the top
+        banner_height = 60
+        overlay = frame.copy()
+        cv2.rectangle(overlay, (0, 0), (width, banner_height), (0, 0, 0), -1)
+        
+        # Blend the banner
+        alpha = 0.8
+        frame[:banner_height] = cv2.addWeighted(
+            frame[:banner_height], alpha, 
+            overlay[:banner_height], 1 - alpha, 0
+        )
+        
+        # YouTube video title (shortened)
+        title = video_info.get('title', 'Unknown Video')
+        if len(title) > 50:
+            title = title[:47] + '...'
+        
+        cv2.putText(frame, f"📺 {title}", (10, 20), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        
+        # Channel and duration info
+        channel = video_info.get('uploader', 'Unknown')
+        if len(channel) > 25:
+            channel = channel[:22] + '...'
+        
+        duration_str = self._format_time(elapsed_time)
+        info_text = f"Channel: {channel} | Duration: {duration_str}"
+        
+        cv2.putText(frame, info_text, (10, 45), 
+                   cv2.FONT_HERSHEY_SIMPLEX, 0.4, (200, 200, 200), 1)
+        
+        return frame
     
     def add_youtube_overlay(self, frame, detections, fps, video_info):
         """

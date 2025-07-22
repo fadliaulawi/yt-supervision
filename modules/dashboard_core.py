@@ -289,6 +289,10 @@ class StreamlitDashboard:
                     total_duration = 0.0
                     combined_detection_counts = {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
                     combined_unique_counts = {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+                    combined_directional_counts = {
+                        'left': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0},
+                        'right': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+                    }
                     total_unique_vehicles = 0
                     tracking_enabled_count = 0
                     latest_config = None
@@ -302,6 +306,14 @@ class StreamlitDashboard:
                         detection_counts = analysis.get('detection_counts', {})
                         for vehicle_type in combined_detection_counts:
                             combined_detection_counts[vehicle_type] += detection_counts.get(vehicle_type, 0)
+                        
+                        # Add directional counts
+                        directional_counts = analysis.get('directional_counts', {})
+                        if directional_counts:
+                            for direction in ['left', 'right']:
+                                dir_counts = directional_counts.get(direction, {})
+                                for vehicle_type in combined_directional_counts[direction]:
+                                    combined_directional_counts[direction][vehicle_type] += dir_counts.get(vehicle_type, 0)
                         
                         # Add unique counts if tracking was enabled for this analysis
                         if analysis.get('tracking_enabled', False):
@@ -321,6 +333,7 @@ class StreamlitDashboard:
                         'total_frames': total_frames,
                         'total_detections': total_detections,
                         'detection_counts': combined_detection_counts,
+                        'directional_counts': combined_directional_counts,
                         'config': latest_config or {},
                         'is_combined': True
                     }
@@ -495,6 +508,117 @@ class StreamlitDashboard:
                                     showlegend=False
                                 )
                                 st.plotly_chart(fig_bar, use_container_width=True)
+                        
+                        # Add directional analysis if available
+                        directional_counts = results.get('directional_counts')
+                        unique_directional_counts = results.get('unique_directional_counts')
+                        
+                        # Use unique directional counts if tracking is enabled and available
+                        if results.get('tracking_enabled', False) and unique_directional_counts:
+                            left_counts = unique_directional_counts.get('left', {})
+                            right_counts = unique_directional_counts.get('right', {})
+                            chart_title_suffix = " (Unique Vehicles)"
+                        elif directional_counts:
+                            left_counts = directional_counts.get('left', {})
+                            right_counts = directional_counts.get('right', {})
+                            chart_title_suffix = ""
+                        else:
+                            left_counts = {}
+                            right_counts = {}
+                            chart_title_suffix = ""
+                        
+                        if (left_counts or right_counts) and (sum(left_counts.values()) > 0 or sum(right_counts.values()) > 0):
+                            st.subheader("🧭 Directional Traffic Analysis")
+                            
+                            # Filter out zero counts
+                            vehicle_types = ['car', 'truck', 'bus', 'motorcycle']
+                            left_filtered = {vtype: left_counts.get(vtype, 0) for vtype in vehicle_types if left_counts.get(vtype, 0) > 0}
+                            right_filtered = {vtype: right_counts.get(vtype, 0) for vtype in vehicle_types if right_counts.get(vtype, 0) > 0}
+                            
+                            col3, col4 = st.columns(2)
+                            
+                            with col3:
+                                # Left vs Right summary bar chart
+                                if left_filtered or right_filtered:
+                                    # Combine data for comparison chart
+                                    all_vehicles = set(left_filtered.keys()) | set(right_filtered.keys())
+                                    left_values = [left_filtered.get(vtype, 0) for vtype in all_vehicles]
+                                    right_values = [right_filtered.get(vtype, 0) for vtype in all_vehicles]
+                                    
+                                    fig_dir = go.Figure()
+                                    fig_dir.add_trace(go.Bar(
+                                        x=list(all_vehicles), y=left_values,
+                                        name='Left Side', marker_color='#FF9999'
+                                    ))
+                                    fig_dir.add_trace(go.Bar(
+                                        x=list(all_vehicles), y=right_values,
+                                        name='Right Side', marker_color='#99CCFF'
+                                    ))
+                                    
+                                    fig_dir.update_layout(
+                                        title=f"🔄 Left vs Right Side Distribution{chart_title_suffix}",
+                                        barmode='group',
+                                        height=400,
+                                        xaxis_title="Vehicle Type",
+                                        yaxis_title="Count"
+                                    )
+                                    st.plotly_chart(fig_dir, use_container_width=True)
+                            
+                            with col4:
+                                # Overall directional split pie chart
+                                total_left = sum(left_counts.values())
+                                total_right = sum(right_counts.values())
+                                
+                                if total_left > 0 or total_right > 0:
+                                    fig_split = px.pie(
+                                        values=[total_left, total_right],
+                                        names=['Left Side', 'Right Side'],
+                                        title=f"📊 Overall Traffic Direction{chart_title_suffix}",
+                                        color_discrete_sequence=['#FF9999', '#99CCFF']
+                                    )
+                                    fig_split.update_layout(height=400)
+                                    st.plotly_chart(fig_split, use_container_width=True)
+                            
+                            # Show directional metrics in expandable section
+                            with st.expander("📋 Detailed Directional Statistics"):
+                                # Use unique directional counts if available, otherwise fall back to regular
+                                unique_directional = results.get('unique_directional_counts', {})
+                                if unique_directional and results.get('tracking_enabled', False):
+                                    left_unique = unique_directional.get('left', {})
+                                    right_unique = unique_directional.get('right', {})
+                                    left_filtered_unique = {vtype: left_unique.get(vtype, 0) for vtype in vehicle_types if left_unique.get(vtype, 0) > 0}
+                                    right_filtered_unique = {vtype: right_unique.get(vtype, 0) for vtype in vehicle_types if right_unique.get(vtype, 0) > 0}
+                                    total_left_unique = sum(left_unique.values())
+                                    total_right_unique = sum(right_unique.values())
+                                    
+                                    left_col, right_col = st.columns(2)
+                                    
+                                    with left_col:
+                                        st.markdown("**🔴 Left Side (Unique Vehicles):**")
+                                        for vtype, count in left_filtered_unique.items():
+                                            st.write(f"• {vtype.capitalize()}s: {count}")
+                                        st.write(f"**Total Unique Left: {total_left_unique}**")
+                                    
+                                    with right_col:
+                                        st.markdown("**🔵 Right Side (Unique Vehicles):**")
+                                        for vtype, count in right_filtered_unique.items():
+                                            st.write(f"• {vtype.capitalize()}s: {count}")
+                                        st.write(f"**Total Unique Right: {total_right_unique}**")
+                                else:
+                                    # Fall back to regular directional counts if unique not available
+                                    left_col, right_col = st.columns(2)
+                                    
+                                    with left_col:
+                                        st.markdown("**🔴 Left Side:**")
+                                        for vtype, count in left_filtered.items():
+                                            st.write(f"• {vtype.capitalize()}s: {count}")
+                                        st.write(f"**Total Left: {total_left}**")
+                                    
+                                    with right_col:
+                                        st.markdown("**🔵 Right Side:**")
+                                        for vtype, count in right_filtered.items():
+                                            st.write(f"• {vtype.capitalize()}s: {count}")
+                                        st.write(f"**Total Right: {total_right}**")
                 else:
                     st.info("📋 No analysis results available.")
                     st.info("💡 Results will appear here after completing an analysis.")

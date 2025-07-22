@@ -134,7 +134,12 @@ def save_analysis_results(stats, config, start_time=None):
             'detection_counts': stats.get('vehicle_counts_by_type', {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}),
             'total_detections': stats.get('total_vehicle_detections', 0),
             'average_fps': stats.get('average_fps', 0),
-            'config': config
+            'config': config,
+            # Add directional statistics (NEW FEATURE!)
+            'directional_counts': stats.get('directional_counts', {
+                'left': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0},
+                'right': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+            })
         }
         
         # Add tracking statistics if available
@@ -143,7 +148,12 @@ def save_analysis_results(stats, config, start_time=None):
                 'tracking_enabled': True,
                 'unique_vehicles_total': stats.get('unique_vehicles_total', 0),
                 'unique_vehicle_counts_by_type': stats.get('unique_vehicle_counts_by_type', {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}),
-                'active_tracks': stats.get('active_tracks', 0)
+                'active_tracks': stats.get('active_tracks', 0),
+                # Add unique directional statistics for tracking
+                'unique_directional_counts': stats.get('unique_directional_counts', {
+                    'left': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0},
+                    'right': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+                })
             })
         else:
             new_analysis['tracking_enabled'] = False
@@ -174,6 +184,10 @@ def save_analysis_results(stats, config, start_time=None):
         # Combine detection counts
         combined_counts = {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
         combined_unique_counts = {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+        combined_directional_counts = {
+            'left': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0},
+            'right': {'car': 0, 'truck': 0, 'bus': 0, 'motorcycle': 0}
+        }
         total_unique_vehicles = 0
         tracking_analyses = 0
         
@@ -181,6 +195,13 @@ def save_analysis_results(stats, config, start_time=None):
             # Regular detection counts
             for vehicle_type in combined_counts:
                 combined_counts[vehicle_type] += analysis['detection_counts'].get(vehicle_type, 0)
+            
+            # Combine directional counts
+            directional_counts = analysis.get('directional_counts', {})
+            for direction in ['left', 'right']:
+                dir_counts = directional_counts.get(direction, {})
+                for vehicle_type in combined_directional_counts[direction]:
+                    combined_directional_counts[direction][vehicle_type] += dir_counts.get(vehicle_type, 0)
             
             # Unique tracking counts if available
             if analysis.get('tracking_enabled', False):
@@ -197,6 +218,7 @@ def save_analysis_results(stats, config, start_time=None):
             'total_frames': total_frames,
             'total_duration': total_duration,
             'combined_detection_counts': combined_counts,
+            'combined_directional_counts': combined_directional_counts,  # Add directional stats
             'last_updated': analysis_end.isoformat()
         }
         
@@ -238,7 +260,11 @@ def demo_webcam():
     start_time = datetime.now()
     
     try:
-        detector = VideoDetector(confidence_threshold=0.7)
+        detector = VideoDetector(
+            model_path="models/yolo11l.pt",
+            confidence_threshold=0.7,
+            enable_tracking=True
+        )
         stats = detector.process_video(source="0", display=True)
         
         print(f"Average FPS: {stats['average_fps']:.2f}")
@@ -247,7 +273,7 @@ def demo_webcam():
         # Save results for dashboard integration
         save_analysis_results(stats, {
             'mode': 'webcam',
-            'model_path': 'models/yolov8n.pt',
+            'model_path': 'models/yolo11l.pt',
             'confidence': 0.7
         }, start_time)
         
@@ -266,7 +292,11 @@ def demo_video_file(video_path: str, output_path: str = None):
     start_time = datetime.now()
     
     try:
-        detector = VideoDetector(confidence_threshold=0.7)
+        detector = VideoDetector(
+            model_path="models/yolo11l.pt",  # Use the model that works
+            confidence_threshold=0.7,
+            enable_tracking=True  # Ensure tracking is enabled for unique counts
+        )
         stats = detector.process_video(
             source=video_path, 
             output_path=output_path,
@@ -279,12 +309,21 @@ def demo_video_file(video_path: str, output_path: str = None):
         print(f"Total vehicles detected: {stats['total_vehicle_detections']}")
         print(f"Vehicle breakdown: {stats['vehicle_counts_by_type']}")
         
+        # Show directional statistics if available
+        directional_counts = stats.get('directional_counts', {})
+        if directional_counts:
+            left_total = sum(directional_counts.get('left', {}).values())
+            right_total = sum(directional_counts.get('right', {}).values())
+            print(f"\n🧭 DIRECTIONAL ANALYSIS:")
+            print(f"Left side: {left_total} vehicles")
+            print(f"Right side: {right_total} vehicles")
+        
         # Save results for dashboard integration
         save_analysis_results(stats, {
             'mode': 'file',
             'video_path': video_path,
             'output_path': output_path,
-            'model_path': 'models/yolov8n.pt',
+            'model_path': 'models/yolo11l.pt',
             'confidence': 0.7
         }, start_time)
         

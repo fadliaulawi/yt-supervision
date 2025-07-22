@@ -397,19 +397,33 @@ class VideoDetector:
         self.logger = logging.getLogger(__name__)
 
     def initialize_statistics(self):
-        """Initialize detection statistics tracking with tracking support."""
+        """Initialize detection statistics tracking with tracking support and directional counting."""
         self.detection_stats = {
             'total_frames': 0,
             'detections_per_frame': [],
             'processing_times': [],
-            'vehicle_counts': {cls: 0 for cls in self.class_names.values()}
+            'vehicle_counts': {cls: 0 for cls in self.class_names.values()},
+            # Directional statistics - left and right side of center line
+            'directional_counts': {
+                'left': {cls: 0 for cls in self.class_names.values()},
+                'right': {cls: 0 for cls in self.class_names.values()}
+            }
         }
         
         # Initialize tracking-specific statistics if tracking is enabled
         if self.enable_tracking:
             self.detection_stats.update({
                 'unique_vehicle_counts': {cls: 0 for cls in self.class_names.values()},
-                'tracked_vehicles_by_class': {cls: set() for cls in self.class_names.values()}
+                'tracked_vehicles_by_class': {cls: set() for cls in self.class_names.values()},
+                # Directional unique counts for tracked vehicles
+                'unique_directional_counts': {
+                    'left': {cls: 0 for cls in self.class_names.values()},
+                    'right': {cls: 0 for cls in self.class_names.values()}
+                },
+                'tracked_vehicles_by_direction': {
+                    'left': {cls: set() for cls in self.class_names.values()},
+                    'right': {cls: set() for cls in self.class_names.values()}
+                }
             })
 
     def ensure_model_available(self):
@@ -804,7 +818,7 @@ class VideoDetector:
     
     def add_info_overlay(self, frame: np.ndarray, detections: List[Dict], fps: float) -> np.ndarray:
         """
-        Add comprehensive information overlay to the frame with tracking stats.
+        Add comprehensive information overlay to the frame with tracking stats and directional counts.
         
         Args:
             frame: Input frame
@@ -814,8 +828,12 @@ class VideoDetector:
         Returns:
             Frame with information overlay
         """
-        # Count vehicles by type
+        # Count vehicles by type and direction
         vehicle_counts = self._count_vehicles_by_type(detections)
+        directional_counts = self._count_vehicles_by_direction(detections, frame.shape[1])
+        
+        # Draw center line for visual reference
+        self._draw_center_line(frame)
         
         # Prepare information lines
         info_lines = [
@@ -824,6 +842,18 @@ class VideoDetector:
             *[f"{vehicle_type.capitalize()}s: {count}" 
               for vehicle_type, count in vehicle_counts.items()]
         ]
+        
+        # Add directional statistics
+        left_total = sum(directional_counts['left'].values())
+        right_total = sum(directional_counts['right'].values())
+        
+        if left_total > 0 or right_total > 0:
+            info_lines.extend([
+                "-" * 20,
+                "DIRECTIONAL STATS:",
+                f"Left Side: {left_total}",
+                f"Right Side: {right_total}"
+            ])
         
         # Add tracking information
         if self.enable_tracking:
@@ -844,6 +874,17 @@ class VideoDetector:
                 for vehicle_type, count in unique_counts.items():
                     if count > 0:
                         info_lines.append(f"Unique {vehicle_type.capitalize()}s: {count}")
+                        
+            # Add directional unique counts if tracking is enabled
+            unique_dir_counts = self.detection_stats.get('unique_directional_counts', {})
+            if unique_dir_counts:
+                left_unique = sum(unique_dir_counts['left'].values())
+                right_unique = sum(unique_dir_counts['right'].values())
+                if left_unique > 0 or right_unique > 0:
+                    info_lines.extend([
+                        f"Unique Left: {left_unique}",
+                        f"Unique Right: {right_unique}"
+                    ])
         
         self._draw_info_panel(frame, info_lines)
         return frame
@@ -856,10 +897,46 @@ class VideoDetector:
             vehicle_counts[class_name] = vehicle_counts.get(class_name, 0) + 1
         return vehicle_counts
 
+    def _get_vehicle_direction(self, detection: Dict, frame_width: int) -> str:
+        """
+        Determine if vehicle is on left or right side of center line.
+        
+        Args:
+            detection: Vehicle detection dictionary with bbox coordinates
+            frame_width: Width of the frame
+            
+        Returns:
+            'left' or 'right' based on vehicle's center position
+        """
+        # Get bounding box center x coordinate
+        x1, y1, x2, y2 = detection['bbox']
+        center_x = (x1 + x2) / 2
+        
+        # Determine side based on center line (frame width / 2)
+        frame_center = frame_width / 2
+        return 'left' if center_x < frame_center else 'right'
+
+    def _count_vehicles_by_direction(self, detections: List[Dict], frame_width: int) -> Dict[str, Dict[str, int]]:
+        """Count vehicles by type and direction (left/right of center line)."""
+        directional_counts = {
+            'left': {},
+            'right': {}
+        }
+        
+        for detection in detections:
+            class_name = detection['class_name']
+            direction = self._get_vehicle_direction(detection, frame_width)
+            
+            if class_name not in directional_counts[direction]:
+                directional_counts[direction][class_name] = 0
+            directional_counts[direction][class_name] += 1
+            
+        return directional_counts
+
     def _draw_info_panel(self, frame: np.ndarray, info_lines: List[str]):
-        """Draw information panel with background."""
+        """Draw information panel with background - adjusted for directional stats."""
         panel_height = len(info_lines) * 25 + 10
-        panel_width = 250
+        panel_width = 280  # Increased width for directional stats
         
         # Draw panel background
         cv2.rectangle(frame, (10, 10), (panel_width, panel_height), (0, 0, 0), -1)
@@ -874,8 +951,30 @@ class VideoDetector:
                 (255, 255, 255), Config.FONT_THICKNESS
             )
 
-    def update_statistics(self, detections: List[Dict]):
-        """Update comprehensive detection statistics with tracking support."""
+    def _draw_center_line(self, frame: np.ndarray):
+        """Draw a vertical center line to visualize the left/right division."""
+        height, width = frame.shape[:2]
+        center_x = width // 2
+        
+        # Draw dashed center line
+        dash_length = 20
+        gap_length = 10
+        current_y = 0
+        
+        while current_y < height:
+            # Draw dash
+            end_y = min(current_y + dash_length, height)
+            cv2.line(frame, (center_x, current_y), (center_x, end_y), (0, 255, 255), 2)  # Cyan color
+            current_y += dash_length + gap_length
+        
+        # Add "L" and "R" labels at the top
+        cv2.putText(frame, "L", (center_x - 40, 40), cv2.FONT_HERSHEY_SIMPLEX, 
+                   1.0, (0, 255, 255), 2)  # Left side label
+        cv2.putText(frame, "R", (center_x + 20, 40), cv2.FONT_HERSHEY_SIMPLEX, 
+                   1.0, (0, 255, 255), 2)  # Right side label
+
+    def update_statistics(self, detections: List[Dict], frame_width: int = None):
+        """Update comprehensive detection statistics with tracking support and directional counting."""
         self.detection_stats['total_frames'] += 1
         self.detection_stats['detections_per_frame'].append(len(detections))
         
@@ -883,6 +982,11 @@ class VideoDetector:
         for detection in detections:
             class_name = detection['class_name']
             self.detection_stats['vehicle_counts'][class_name] += 1
+            
+            # Update directional counts if frame width is provided
+            if frame_width:
+                direction = self._get_vehicle_direction(detection, frame_width)
+                self.detection_stats['directional_counts'][direction][class_name] += 1
             
             # Update tracking statistics if tracking is enabled and track_id exists
             if self.enable_tracking and 'track_id' in detection:
@@ -893,6 +997,13 @@ class VideoDetector:
                     self.detection_stats['tracked_vehicles_by_class'][class_name].add(track_id)
                     self.detection_stats['unique_vehicle_counts'][class_name] += 1
                     self.logger.debug(f"New {class_name} tracked: ID {track_id}. Total unique {class_name}s: {self.detection_stats['unique_vehicle_counts'][class_name]}")
+                    
+                    # Update directional unique tracking if frame width is provided
+                    if frame_width:
+                        direction = self._get_vehicle_direction(detection, frame_width)
+                        if track_id not in self.detection_stats['tracked_vehicles_by_direction'][direction][class_name]:
+                            self.detection_stats['tracked_vehicles_by_direction'][direction][class_name].add(track_id)
+                            self.detection_stats['unique_directional_counts'][direction][class_name] += 1
         
         # Additional tracking statistics update - count all tracker IDs, not just active ones
         if self.enable_tracking and hasattr(self, 'tracker'):
@@ -996,8 +1107,8 @@ class VideoDetector:
             current_fps = frame_count / (time.time() - start_time)
             annotated_frame = self.add_info_overlay(annotated_frame, detections, current_fps)
             
-            # Update statistics
-            self.update_statistics(detections)
+            # Update statistics with frame width for directional counting
+            self.update_statistics(detections, video_info['width'])
             
             # Handle display and user input
             if display and self._handle_frame_display(annotated_frame, bool(out)):
@@ -1057,7 +1168,7 @@ class VideoDetector:
         }
 
     def _generate_final_statistics(self, processing_stats: Dict) -> Dict:
-        """Generate comprehensive final statistics with tracking information."""
+        """Generate comprehensive final statistics with tracking information and directional counts."""
         total_time = processing_stats['processing_time']
         frames_processed = processing_stats['frames_processed']
         
@@ -1068,7 +1179,9 @@ class VideoDetector:
             'average_detection_time': np.mean(self.detection_stats['processing_times']) if self.detection_stats['processing_times'] else 0,
             'total_vehicle_detections': sum(self.detection_stats['vehicle_counts'].values()),
             'vehicle_counts_by_type': self.detection_stats['vehicle_counts'].copy(),
-            'avg_detections_per_frame': np.mean(self.detection_stats['detections_per_frame']) if self.detection_stats['detections_per_frame'] else 0
+            'avg_detections_per_frame': np.mean(self.detection_stats['detections_per_frame']) if self.detection_stats['detections_per_frame'] else 0,
+            # Add directional statistics
+            'directional_counts': self.detection_stats['directional_counts'].copy()
         }
         
         # Add tracking statistics
@@ -1081,7 +1194,9 @@ class VideoDetector:
                 'tracking_enabled': True,
                 'unique_vehicles_total': unique_total,
                 'unique_vehicle_counts_by_type': unique_counts,
-                'active_tracks': len(self.tracker.trackers) if hasattr(self.tracker, 'trackers') else 0
+                'active_tracks': len(self.tracker.trackers) if hasattr(self.tracker, 'trackers') else 0,
+                # Add unique directional statistics if tracking is enabled
+                'unique_directional_counts': self.detection_stats.get('unique_directional_counts', {})
             })
         else:
             stats['tracking_enabled'] = False
