@@ -6,16 +6,24 @@ A comprehensive Python application for detecting and analyzing vehicles (cars, t
 
 ### 🌐 Interactive Web Dashboard
 - **📱 Modern UI**: Clean Streamlit interface with real-time updates
-- **📊 Live Analytics**: Interactive charts showing detection trends and vehicle distribution
+- **📊 Live Analytics**: Interactive charts showing detection trends and directional traffic distribution
+- **↔️ Directional Analysis**: Left/right traffic flow visualization with unique vehicle tracking
 - **🎯 Smart Controls**: Model selection, confidence adjustment, and quality settings
 - **📈 Performance Metrics**: Real-time FPS, processing time, and detection statistics
 - **💾 Session Management**: Results persistence within dashboard session
 
 ### 🎥 Multi-Source Analysis
 - **📺 YouTube Integration**: Analyze any YouTube video or live stream with `yt-dlp`
-- **� File Processing**: Support for MP4, AVI, MOV, MKV, and FLV video formats
+- **📁 File Processing**: Support for MP4, AVI, MOV, MKV, and FLV video formats
 - **🎥 Live Webcam**: Real-time detection from camera feed
-- **� Fire-and-Forget Processing**: Independent analysis processes with status tracking
+- **🔥 Fire-and-Forget Processing**: Independent analysis processes with status tracking
+
+### 🎯 Directional Traffic Analysis
+- **↔️ Center Line Division**: Automatic frame splitting with vertical center line visualization
+- **📊 Left/Right Counting**: Separate vehicle counts for each direction
+- **🚗 Unique Vehicle Tracking**: SORT algorithm prevents duplicate counting across frames
+- **📈 Directional Statistics**: Real-time charts showing traffic flow distribution
+- **🎨 Visual Overlays**: Cyan dashed center line with L/R directional labels
 
 ### 🤖 Advanced AI Models  
 - **YOLOv11n**: Ultra-fast processing for real-time applications
@@ -68,9 +76,10 @@ Then open **http://localhost:8501** in your browser.
 **Dashboard Features:**
 - 🎛️ **Control Panel**: Choose analysis mode, model, and settings
 - 📊 **Live Monitoring**: Real-time status updates and progress tracking  
-- 📈 **Interactive Charts**: Vehicle distribution and performance analytics
-- 🎥 **Live Preview**: See analysis progress in independent OpenCV window
-- 💾 **Results Export**: Download analysis data and statistics
+- 📈 **Interactive Charts**: Vehicle distribution, directional traffic flow, and performance analytics
+- 🎥 **Live Preview**: See analysis progress with directional center line in independent OpenCV window
+- ↔️ **Directional Analysis**: Left/right traffic statistics with unique vehicle counting
+- 💾 **Results Export**: Download analysis data and directional statistics
 
 ### 4. Command Line Usage
 
@@ -123,10 +132,11 @@ The dashboard uses an innovative **independent process architecture**:
 - **📺 YouTube Input**: Paste any YouTube URL, set quality and duration
 - **📁 File Upload**: Drag & drop video files with automatic format detection
 - **🎥 Webcam Mode**: Live detection from camera with real-time preview
-- **📊 Analytics**: Vehicle distribution charts and detection timelines
+- **📊 Analytics**: Vehicle distribution charts, directional traffic flow, and detection timelines
+- **↔️ Directional Stats**: Left/right vehicle counts with unique tracking visualization
 - **⚙️ Model Selection**: Choose between speed and accuracy (YOLOv11n/l/x)
 - **🎚️ Confidence Control**: Adjust detection sensitivity (0.1 - 1.0)
-- **� Performance Display**: FPS monitoring and frame processing stats
+- **⚡ Performance Display**: FPS monitoring and frame processing stats
 
 ## 🔧 System Architecture
 
@@ -137,9 +147,9 @@ The dashboard uses an innovative **independent process architecture**:
 ├── 🎬 demo.py                    # Unified command-line interface  
 ├── ⚙️ check_gpu.py              # GPU compatibility checker
 ├── 📚 modules/                   # Core system modules
-│   ├── 🎯 video_detector.py     # YOLO detection engine
-│   ├── 📺 youtube_watcher.py    # YouTube stream processor
-│   ├── 🎛️ dashboard_core.py     # Web interface logic
+│   ├── 🎯 video_detector.py     # YOLO detection engine with directional analysis
+│   ├── 📺 youtube_watcher.py    # YouTube stream processor with traffic flow tracking
+│   ├── 🎛️ dashboard_core.py     # Web interface logic with directional charts
 │   ├── 📊 status_manager.py     # Centralized status tracking
 │   ├── ⚙️ config.py             # Unified configuration
 │   └── 🛠️ utils.py              # Helper utilities

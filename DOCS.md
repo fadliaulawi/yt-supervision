@@ -5,6 +5,7 @@
 - [Installation & Setup](#installation--setup)
 - [Dashboard Guide](#dashboard-guide)
 - [Command Line Usage](#command-line-usage)
+- [Directional Traffic Analysis](#directional-traffic-analysis)
 - [YouTube Analysis](#youtube-analysis)
 - [API Reference](#api-reference)
 - [Model Configuration](#model-configuration)
@@ -24,9 +25,11 @@ YT-Supervision is a Python application for real-time vehicle detection using YOL
 
 ### Key Features
 - **Multi-Source Input**: YouTube, local files, webcam with auto-detection
-- **Real-time Processing**: Live analysis with interactive visualizations
+- **Directional Traffic Analysis**: Center line division with left/right vehicle counting
+- **Unique Vehicle Tracking**: SORT algorithm prevents duplicate counting across frames
+- **Real-time Processing**: Live analysis with interactive directional visualizations
 - **AI Models**: YOLOv11n/l/x variants with automatic GPU acceleration
-- **Professional Output**: Broadcasting-quality annotations and analytics
+- **Professional Output**: Broadcasting-quality annotations with traffic flow analytics
 
 ## Installation & Setup
 
@@ -80,8 +83,9 @@ The dashboard launches `demo.py` as an independent subprocess:
 ### Components
 - **Control Panel**: Mode selection (YouTube/File/Webcam), model choice, confidence settings
 - **Status Display**: Real-time analysis state with progress indicators
-- **Analytics**: Vehicle counts, interactive charts, performance metrics
-- **Results**: Session-based data persistence and export
+- **Analytics**: Vehicle counts, directional traffic charts, interactive flow visualizations
+- **Directional Stats**: Left/right vehicle tracking with unique count prioritization
+- **Results**: Session-based data persistence with directional analysis export
 
 ### Usage Flow
 1. Select input source and model
@@ -117,8 +121,72 @@ python demo.py --youtube "URL" --confidence 0.8 --quality 720p
 ### Architecture
 - **Independent Process**: Runs separately from dashboard
 - **Status Integration**: Updates tracked via `status_manager.py`
-- **OpenCV Display**: Direct visual feedback and control
-- **Results Export**: Timestamped JSON output (`analysis_YYYYMMDD_HHMMSS.json`)
+- **OpenCV Display**: Direct visual feedback with directional center line
+- **Results Export**: Timestamped JSON output with directional statistics (`analysis_YYYYMMDD_HHMMSS.json`)
+
+## Directional Traffic Analysis
+
+### Overview
+The system provides comprehensive directional traffic analysis by dividing the video frame with a vertical center line and tracking vehicles moving left vs. right.
+
+### Key Features
+- **🎯 Center Line Division**: Automatic vertical line at frame center (50% width)
+- **↔️ Directional Counting**: Separate vehicle counts for left and right directions
+- **🚗 Unique Vehicle Tracking**: SORT algorithm prevents duplicate counting
+- **📊 Real-time Statistics**: Live directional charts in dashboard
+- **🎨 Visual Overlay**: Cyan dashed center line with L/R labels
+
+### How It Works
+```python
+# Directional logic
+frame_center = frame_width // 2
+vehicle_center_x = (bbox_x1 + bbox_x2) // 2
+
+if vehicle_center_x < frame_center:
+    direction = "left"   # Left side of center line
+else:
+    direction = "right"  # Right side of center line
+```
+
+### Visual Elements
+- **Center Line**: Cyan dashed vertical line at 50% frame width
+- **Direction Labels**: "L" and "R" markers at top of center line
+- **Vehicle Bounding Boxes**: Color-coded by vehicle type
+- **Tracking IDs**: Unique numbers for each tracked vehicle (when enabled)
+
+### Statistics Output
+```json
+{
+  "directional_counts": {
+    "left": {"car": 15, "truck": 3, "bus": 1, "motorcycle": 7},
+    "right": {"car": 22, "truck": 5, "bus": 2, "motorcycle": 4}
+  },
+  "unique_directional_counts": {
+    "left": {"car": 12, "truck": 2, "bus": 1, "motorcycle": 5},
+    "right": {"car": 18, "truck": 4, "bus": 1, "motorcycle": 3}
+  }
+}
+```
+
+### Dashboard Integration
+- **Directional Charts**: Side-by-side bar charts comparing left vs. right traffic
+- **Traffic Flow Pie Chart**: Visual proportion of directional movement
+- **Unique Count Priority**: Dashboard prioritizes unique counts over general detections
+- **Real-time Updates**: Charts update automatically during analysis
+
+### Usage Examples
+```bash
+# All analysis modes include directional tracking by default
+
+# YouTube with directional analysis
+python demo.py --youtube "https://www.youtube.com/watch?v=VIDEO_ID"
+
+# Local video with tracking enabled (recommended for unique counts)
+python demo.py --video "traffic.mp4" --model yolo11l.pt
+
+# Webcam with real-time directional analysis
+python demo.py --webcam --confidence 0.7
+```
 
 ## YouTube Analysis
 
@@ -166,18 +234,23 @@ from modules.utils import validate_video_source, export_analysis_results
 
 ### VideoDetector Class
 ```python
-# Initialize detector
+# Initialize detector with tracking enabled
 detector = VideoDetector(
     model_path="models/yolo11l.pt",
     confidence_threshold=0.7,
-    device="auto"  # Auto GPU detection
+    device="auto",  # Auto GPU detection
+    enable_tracking=True  # Enable unique vehicle tracking
 )
 
 # Core methods
-detector.detect_vehicles(frame)           # Single frame detection
-detector.process_video_source(source)     # Full video processing
-detector.draw_detections(frame, results)  # Annotate frame
-detector.get_performance_stats()          # FPS and timing metrics
+detector.detect_vehicles(frame)              # Single frame detection
+detector.detect_and_track_vehicles(frame)    # Detection with tracking
+detector.process_video_source(source)        # Full video processing
+detector.draw_detections(frame, results)     # Annotate frame with bounding boxes
+detector._draw_center_line(frame)            # Add directional center line
+detector.add_info_overlay(frame, detections, fps)  # Complete overlay
+detector.get_performance_stats()             # FPS and timing metrics
+detector.update_statistics(detections, frame_width)  # Update directional stats
 ```
 
 ### Status Manager
@@ -200,6 +273,11 @@ Config.USE_GPU            # Auto-detected GPU availability
 Config.VEHICLE_CLASSES    # ["car", "truck", "bus", "motorcycle"]
 Config.CONFIDENCE_PRESETS # Common confidence thresholds
 Config.YOUTUBE_QUALITIES  # Available quality options
+
+# Directional analysis settings
+Config.ENABLE_TRACKING    # Enable unique vehicle tracking (default: True)
+Config.CENTER_LINE_COLOR  # Directional line color (default: cyan)
+Config.DIRECTION_LABELS   # Left/Right labels (default: ["L", "R"])
 ```
 
 ## Model Configuration
@@ -241,11 +319,13 @@ performance_matrix = {
 - **Real-time**: Use `yolo11n.pt` with 720p resolution and confidence 0.7+
 - **High-accuracy**: Use `yolo11x.pt` with 1080p resolution and confidence 0.4+
 - **Balanced**: Use `yolo11l.pt` with 720p resolution (recommended)
+- **Directional Tracking**: Enable tracking for accurate unique counts (slight performance impact)
 
 ### Memory Management
 - Automatic GPU memory optimization
 - Periodic cleanup every 100 frames
 - Buffer limits to prevent memory growth
+- Tracking memory management for unique vehicle IDs
 
 ## Troubleshooting
 
@@ -333,9 +413,10 @@ python system_check.py
 ├── 🔍 system_check.py             # Comprehensive system validation
 ├── 📁 modules/                    # Core system modules
 │   ├── ⚙️ config.py               # Unified configuration
-│   ├── 🎥 video_detector.py       # YOLO detection engine
+│   ├── 🎥 video_detector.py       # YOLO detection engine with directional analysis
 │   ├── 📊 status_manager.py       # Centralized status tracking
-│   ├── 🖥️ dashboard_core.py       # Dashboard logic
+│   ├── 🖥️ dashboard_core.py       # Dashboard logic with directional charts
+│   ├── 📺 youtube_watcher.py      # YouTube processor with traffic flow tracking
 │   └── 🛠️ utils.py                # Helper utilities
 ├── 🤖 models/                     # YOLO model storage
 │   ├── ⚡ yolo11n.pt              # Fastest model (auto-downloaded)
@@ -368,12 +449,12 @@ python system_check.py
 ```
 
 ### Data Flow
-1. **Initialization**: Dashboard or CLI validates configuration
-2. **Process Launch**: Independent subprocess spawned for analysis
-3. **Status Tracking**: Real-time updates via `status_manager.py`
-4. **Analysis**: OpenCV window displays results, user controls execution
-5. **Completion**: Results saved as timestamped JSON files
-6. **Integration**: Dashboard automatically loads completed analysis
+1. **Initialization**: Dashboard or CLI validates configuration and enables tracking
+2. **Process Launch**: Independent subprocess spawned for analysis with directional features
+3. **Status Tracking**: Real-time updates via `status_manager.py` with directional statistics
+4. **Analysis**: OpenCV window displays results with center line, user controls execution
+5. **Completion**: Results saved as timestamped JSON files with directional and unique counts
+6. **Integration**: Dashboard automatically loads completed analysis with directional charts
 
 ---
 
@@ -382,10 +463,12 @@ python system_check.py
 This documentation covers the **YT-Supervision Vehicle Detection System** featuring:
 
 - ✅ **Fire-and-Forget Architecture**: Independent processing prevents UI blocking
-- ✅ **Unified Interface**: Single `demo.py` for all analysis types
+- ✅ **Directional Traffic Analysis**: Center line division with left/right vehicle counting
+- ✅ **Unique Vehicle Tracking**: SORT algorithm prevents duplicate counting across frames
+- ✅ **Unified Interface**: Single `demo.py` for all analysis types with directional features
 - ✅ **Centralized Management**: `status_manager.py` coordinates components
-- ✅ **Auto-Configuration**: GPU detection, model management
-- ✅ **Session-Based Results**: Dashboard persistence and analytics
+- ✅ **Auto-Configuration**: GPU detection, model management, tracking enablement
+- ✅ **Session-Based Results**: Dashboard persistence with directional analytics
 
 For quick start instructions, see **[README.md](README.md)**.
 
